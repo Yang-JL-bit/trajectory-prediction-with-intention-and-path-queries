@@ -2,7 +2,7 @@
 Author: Yang Jialong
 Date: 2024-11-11 09:56:15
 LastEditors: Please set LastEditors
-LastEditTime: 2024-11-11 16:48:50
+LastEditTime: 2024-11-12 16:12:48
 Description: 训练并测试道路场景下意图识别模型
 '''
 import os
@@ -17,9 +17,9 @@ if __name__ == '__main__':
     #数据集
     dataset = HighD(raw_data_dir = RAW_DATA_DIR, 
                     processed_dir = PROCESSED_DATA_DIR, 
-                    obs_len = 30, 
-                    pred_len = 50, 
-                    process_data = False)
+                    obs_len = 50, 
+                    pred_len = 75, 
+                    process_data = True)
     train_set, val_set, test_set = split_dataset(dataset)
     print("数据集长度{}, {}, {}".format(len(train_set), len(val_set), len(test_set)))
     

@@ -2,7 +2,7 @@
 Author: Yang Jialong
 Date: 2024-11-11 17:33:56
 LastEditors: Please set LastEditors
-LastEditTime: 2024-11-12 15:58:38
+LastEditTime: 2024-11-12 16:03:22
 Description: 请填写简介
 '''
 
@@ -552,7 +552,7 @@ class HighD(Dataset):
                 lane_keeping_ids.append(key)
         
         #2. 获取变道轨迹的特征
-        for id in tqdm(lane_changing_ids, desc="generate lane changing scene"):
+        for id in lane_changing_ids:
             lane_change_info = self.get_lane_changing_info(tracks_csv[id], lane_num)
             driving_direction = tracks_meta[id][DRIVING_DIRECTION]
             for i in range(len(tracks_csv[id][FRAME]) - self.obs_len + 1):
@@ -563,10 +563,8 @@ class HighD(Dataset):
                 scene_dict["surrounding_obs_traj"] = torch.tensor(surroungding_feature) #(8, obs_len, feature_dim)
                 scene_dict["lane_change_label"] = torch.tensor(lane_change_label) #(1, )
                 scene_list.append(scene_dict)
-                if target_feature[-1][1] < -2 and lane_change_label == 1:
-                    print(lane_change_info, id, i)
         #3. 获取直行轨迹的特征
-        for id in tqdm(lane_keeping_ids, desc="generate lane keeping scene"):
+        for id in lane_keeping_ids:
             driving_direction = tracks_meta[id][DRIVING_DIRECTION]
             for i in range(len(tracks_csv[id][FRAME]) - self.obs_len + 1):
                 target_feature, surroungding_feature = self.construct_traj_features(tracks_csv, tracks_meta, id, i, lanes_info, driving_direction)
