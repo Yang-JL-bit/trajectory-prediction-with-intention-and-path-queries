@@ -1,8 +1,16 @@
+'''
+Author: Yang Jialong
+Date: 2024-11-11 17:33:56
+LastEditors: Please set LastEditors
+LastEditTime: 2024-11-12 15:58:38
+Description: 请填写简介
+'''
 
 import pandas as pd
 import numpy as np
 import torch
 import math
+import os
 from tqdm import tqdm, trange
 
 from dataset.highD.utils import *
@@ -20,9 +28,16 @@ class HighD(Dataset):
         self.scene_data_list = []
         if process_data:
             for i in tqdm(range(1, 61, 1), desc='Processing data'):
-                self.scene_data_list.extend(self.generate_training_data(i))
+                scene_data = self.generate_training_data(i)
+                self.scene_data_list.extend(scene_data)
+                torch.save(scene_data, processed_dir + 'data_{}.pt'.format(i))
+            print("数据处理完毕")
         else:
-            self.scene_data_list = torch.load(self.processed_dir + 'scene_list.pt')
+            file_list = os.listdir(processed_dir)
+            for file in tqdm(file_list):
+                scene_data = torch.load(processed_dir + file)
+                self.scene_data_list.extend(scene_data)
+            print("数据加载完毕")
     def __getitem__(self, id):
         return self.scene_data_list[id]
     
@@ -550,19 +565,17 @@ class HighD(Dataset):
                 scene_list.append(scene_dict)
                 if target_feature[-1][1] < -2 and lane_change_label == 1:
                     print(lane_change_info, id, i)
-        print(len(scene_list))
         #3. 获取直行轨迹的特征
-        # for id in tqdm(lane_keeping_ids, desc="generate lane keeping scene"):
-        #     driving_direction = tracks_meta[id][DRIVING_DIRECTION]
-        #     for i in range(len(tracks_csv[id][FRAME]) - self.obs_len + 1):
-        #         target_feature, surroungding_feature = self.construct_traj_features(tracks_csv, tracks_meta, id, i, lanes_info, driving_direction)
-        #         lane_change_label = 0.
-        #         scene_dict = {}
-        #         scene_dict["target_obs_traj"] = torch.tensor(target_feature) #(obs_len, feature_dim)
-        #         scene_dict["surrounding_obs_traj"] = torch.tensor(surroungding_feature) #(8, obs_len, feature_dim)
-        #         scene_dict["lane_change_label"] = torch.tensor(lane_change_label) #(1, )
-        #         scene_list.append(scene_dict)
-        print(len(scene_list))
+        for id in tqdm(lane_keeping_ids, desc="generate lane keeping scene"):
+            driving_direction = tracks_meta[id][DRIVING_DIRECTION]
+            for i in range(len(tracks_csv[id][FRAME]) - self.obs_len + 1):
+                target_feature, surroungding_feature = self.construct_traj_features(tracks_csv, tracks_meta, id, i, lanes_info, driving_direction)
+                lane_change_label = 0.
+                scene_dict = {}
+                scene_dict["target_obs_traj"] = torch.tensor(target_feature) #(obs_len, feature_dim)
+                scene_dict["surrounding_obs_traj"] = torch.tensor(surroungding_feature) #(8, obs_len, feature_dim)
+                scene_dict["lane_change_label"] = torch.tensor(lane_change_label) #(1, )
+                scene_list.append(scene_dict)
         return scene_list
     
 def get_label_weight(scene_list):
