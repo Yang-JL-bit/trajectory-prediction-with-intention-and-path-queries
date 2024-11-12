@@ -36,7 +36,7 @@ class RoadPredictionModel(nn.Module):
         target_feature = self.lstm_target(target_feature)
         surrounding_feature = self.lstm_surrounding(surrounding_feature.flatten(0, 1)).reshape(bs, n_surr, self.hidden_size)
         target_feature = self.agent2agent(target_feature, surrounding_feature)
-        intention_score = self.intention_prediction(target_feature).squeeze(1)
+        intention_score = self.intention_prediction(target_feature)
         return intention_score
         
 
@@ -81,7 +81,7 @@ def train_model(train_dataset, val_dataset, model: RoadPredictionModel, save_pat
                 print(f"train step: {train_step}, loss: {loss}, acc: {acc * 100 : .2f}%, time: {time.time() - start_time: .2f}s" )
             train_step += 1
         #模型验证
-        val_loss = val_model(val_dataset, model, val_sample_weight, scalar, device)
+        val_loss, _ = val_model(val_dataset, model, val_sample_weight, scalar, device)
         val_loss_list.append(val_loss.data.cpu())
         early_stopping(val_loss, model)
         torch.save(train_loss_list, save_path + 'train_loss.pth')
@@ -124,6 +124,8 @@ def val_model(val_dataset, model: RoadPredictionModel, val_sample_weight, scalar
     surrounding_mean = scalar['surrounding'][0].unsqueeze(0).unsqueeze(2).to(device)
     surrounding_std = scalar['surrounding'][1].unsqueeze(0).unsqueeze(2).to(device)
     loss_fn = CrossEntropyLoss().to(device)
+    correct = 0
+    total = 0
     model.eval()
     val_loss_sum = torch.tensor(0.).to(device)
     with torch.no_grad():
@@ -132,8 +134,11 @@ def val_model(val_dataset, model: RoadPredictionModel, val_sample_weight, scalar
             surrounding_feature = (traj_data['surrounding_obs_traj'].to(device) - surrounding_mean) / surrounding_std
             lane_change_label = traj_data['lane_change_label'].to(device)
             intention_score = model(target_feature, surrounding_feature)
+            acc = cal_acc(intention_score, lane_change_label)
+            correct += int(acc * len(intention_score))
+            total += len(intention_score)
             val_loss = loss_fn(intention_score, lane_change_label)
             val_loss_sum += val_loss * len(traj_data)
-    return val_loss_sum / len(val_dataset)    
+    return val_loss_sum / len(val_dataset), correct / total    
     
     

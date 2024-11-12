@@ -1,3 +1,10 @@
+'''
+Author: Yang Jialong
+Date: 2024-11-11 17:33:48
+LastEditors: Please set LastEditors
+LastEditTime: 2024-11-12 09:36:47
+Description: 请填写简介
+'''
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,10 +18,12 @@ class LSTM(nn.Module):
         self.output_size = output_size
         self.lstm_layer = nn.LSTM(self.input_size, self.hidden_size, self.num_layers, batch_first=True, dtype=torch.float64)
         self.output_layer = nn.Linear(hidden_size, output_size, dtype=torch.float64)
+        self.layer_norm = nn.LayerNorm(hidden_size, dtype=torch.float64)
     
     def forward(self, x):
         h0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size, dtype=torch.float64)
         c0 = torch.zeros(self.num_layers, x.size(0), self.hidden_size, dtype=torch.float64)
         out, _ = self.lstm_layer(x, (h0, c0))
+        out = self.layer_norm(out)
         # out = F.softmax(self.output_layer(out[:, -1, :]), dim=-1)
         return out[:, -1, :]

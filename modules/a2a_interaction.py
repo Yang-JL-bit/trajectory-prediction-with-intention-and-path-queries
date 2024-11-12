@@ -1,3 +1,10 @@
+'''
+Author: Yang Jialong
+Date: 2024-11-11 17:33:54
+LastEditors: Please set LastEditors
+LastEditTime: 2024-11-12 10:04:03
+Description: 请填写简介
+'''
 import torch
 import torch.nn as nn
 from torch.nn import init
@@ -54,6 +61,8 @@ class A2A(nn.Module):
     def __init__(self, input_size, hidden_size, head_num) -> None:
         super(A2A,self).__init__()
         self.self_attention = SelfAttention(input_size, head_num, hidden_size, hidden_size)
+        self.batch_norm = nn.BatchNorm1d(hidden_size, dtype=torch.float64)
+        self.layer_norm = nn.LayerNorm(hidden_size, dtype=torch.float64)
     
     def forward(self, target_feature: torch.Tensor, surrounding_feature):
         """
@@ -62,7 +71,7 @@ class A2A(nn.Module):
         """
         target_feature = target_feature.unsqueeze(1)
         target_feature = self.self_attention(target_feature, surrounding_feature, surrounding_feature) + target_feature
-        return target_feature
+        return self.layer_norm(target_feature.squeeze(1))
 
 # q = torch.randn([16, 1, 10])
 # k = torch.randn([16, 3, 10])
