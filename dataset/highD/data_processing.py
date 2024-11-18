@@ -2,7 +2,7 @@
 Author: Yang Jialong
 Date: 2024-11-11 17:33:56
 LastEditors: Please set LastEditors
-LastEditTime: 2024-11-12 16:03:22
+LastEditTime: 2024-11-15 11:09:37
 Description: 请填写简介
 '''
 
@@ -11,6 +11,7 @@ import numpy as np
 import torch
 import math
 import os
+from random import sample
 from tqdm import tqdm, trange
 
 from dataset.highD.utils import *
@@ -31,12 +32,14 @@ class HighD(Dataset):
                 scene_data = self.generate_training_data(i)
                 self.scene_data_list.extend(scene_data)
                 torch.save(scene_data, processed_dir + 'data_{}.pt'.format(i))
+                break
             print("数据处理完毕")
         else:
             file_list = os.listdir(processed_dir)
             for file in tqdm(file_list):
                 scene_data = torch.load(processed_dir + file)
                 self.scene_data_list.extend(scene_data)
+                break
             print("数据加载完毕")
     def __getitem__(self, id):
         return self.scene_data_list[id]
@@ -198,7 +201,7 @@ class HighD(Dataset):
         右变道2
         """
         for i in range(len(lane_change_info)):
-            if end_frame_idx >= lane_change_info[i][0] and end_frame_idx <= lane_change_info[i][2]:
+            if end_frame_idx >= lane_change_info[i][0] and end_frame_idx < lane_change_info[i][1]:
                 return lane_change_info[i][3]
         return 0
         
@@ -552,7 +555,7 @@ class HighD(Dataset):
                 lane_keeping_ids.append(key)
         
         #2. 获取变道轨迹的特征
-        for id in lane_changing_ids:
+        for id in tqdm(lane_changing_ids):
             lane_change_info = self.get_lane_changing_info(tracks_csv[id], lane_num)
             driving_direction = tracks_meta[id][DRIVING_DIRECTION]
             for i in range(len(tracks_csv[id][FRAME]) - self.obs_len + 1):
@@ -563,8 +566,12 @@ class HighD(Dataset):
                 scene_dict["surrounding_obs_traj"] = torch.tensor(surroungding_feature) #(8, obs_len, feature_dim)
                 scene_dict["lane_change_label"] = torch.tensor(lane_change_label) #(1, )
                 scene_list.append(scene_dict)
-        #3. 获取直行轨迹的特征
-        for id in lane_keeping_ids:
+                
+        #3. 获取直行轨迹的特征(直行轨迹太多了，只抽一部分就行了)
+        if len(lane_keeping_ids) > 100:
+            lane_keeping_ids = sample(lane_keeping_ids, 100)
+            
+        for id in tqdm(lane_keeping_ids):
             driving_direction = tracks_meta[id][DRIVING_DIRECTION]
             for i in range(len(tracks_csv[id][FRAME]) - self.obs_len + 1):
                 target_feature, surroungding_feature = self.construct_traj_features(tracks_csv, tracks_meta, id, i, lanes_info, driving_direction)
@@ -585,6 +592,7 @@ def get_label_weight(scene_list):
             label_num[1] += 1
         else:
             label_num[2] += 1
+    print(label_num)
     return [sum(label_num) / i for i in label_num]
 
 def standard_normalization(input_tensor):

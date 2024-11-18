@@ -1,8 +1,8 @@
 '''
 Author: Yang Jialong
 Date: 2024-11-06 20:00:09
-LastEditors: 
-LastEditTime: 2024-11-11 17:07:39
+LastEditors: Please set LastEditors
+LastEditTime: 2024-11-18 11:00:21
 Description: 请填写简介
 '''
 # TRACK FILE
@@ -67,5 +67,10 @@ UPPER_LANE_MARKINGS = "upperLaneMarkings"
 LOWER_LANE_MARKINGS = "lowerLaneMarkings"
 
 
+#轨迹预测采样
+MIN_LANE_CHANGE_TIME = 0.6
+MAX_LANE_CHANGE_TIME = 6
+LANE_CHANGE_SAMPLR_STEP = 0.2
+
 RAW_DATA_DIR = 'C:/Users/Public/yjl/课题/code/highD/data/'
-PROCESSED_DATA_DIR = 'C:/Users/Public/yjl/课题/code/highD/processed_data/'
+PROCESSED_DATA_DIR = 'C:/Users/Public/yjl/课题/code/highD/processed_data_2/'

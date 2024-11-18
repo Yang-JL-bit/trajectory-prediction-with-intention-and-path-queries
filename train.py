@@ -2,7 +2,7 @@
 Author: Yang Jialong
 Date: 2024-11-11 09:56:15
 LastEditors: Please set LastEditors
-LastEditTime: 2024-11-12 16:12:48
+LastEditTime: 2024-11-15 11:13:22
 Description: 训练并测试道路场景下意图识别模型
 '''
 import os
@@ -19,7 +19,7 @@ if __name__ == '__main__':
                     processed_dir = PROCESSED_DATA_DIR, 
                     obs_len = 50, 
                     pred_len = 75, 
-                    process_data = True)
+                    process_data = False)
     train_set, val_set, test_set = split_dataset(dataset)
     print("数据集长度{}, {}, {}".format(len(train_set), len(val_set), len(test_set)))
     
@@ -36,7 +36,7 @@ if __name__ == '__main__':
         device = torch.device("cpu")
         print("Running on the CPU")
     
-    model = RoadPredictionModel(obs_len=30, 
+    model = RoadPredictionModel(obs_len=50, 
                                 input_size=10, 
                                 hidden_size=32, 
                                 num_layers=2, 

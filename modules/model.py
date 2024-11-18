@@ -69,7 +69,7 @@ def train_model(train_dataset, val_dataset, model: RoadPredictionModel, save_pat
         for j, traj_data in enumerate(train_dataloader):
             target_feature = (traj_data['target_obs_traj'].to(device) - target_mean) / target_std
             surrounding_feature = (traj_data['surrounding_obs_traj'].to(device) - surrounding_mean) / surrounding_std
-            lane_change_label = traj_data['lane_change_label'].to(device)
+            lane_change_label = traj_data['lane_change_label'].to(torch.long).to(device)
             intention_score = model(target_feature, surrounding_feature)
             acc = cal_acc(intention_score, lane_change_label)
             loss = loss_fn(intention_score, lane_change_label)
@@ -106,7 +106,7 @@ def test_model(test_dataset, model: RoadPredictionModel,  test_sample_weight, sc
         for traj_data in test_dataloader:
             target_feature = (traj_data['target_obs_traj'].to(device) - target_mean) / target_std
             surrounding_feature = (traj_data['surrounding_obs_traj'].to(device) - surrounding_mean) / surrounding_std
-            lane_change_label = traj_data['lane_change_label'].to(device)
+            lane_change_label = traj_data['lane_change_label'].to(torch.long).to(device)
             intention_score = model(target_feature, surrounding_feature)
             acc = cal_acc(intention_score, lane_change_label)
             correct += int(acc * len(intention_score))
@@ -132,13 +132,13 @@ def val_model(val_dataset, model: RoadPredictionModel, val_sample_weight, scalar
         for i, traj_data in enumerate(val_dataloader):
             target_feature = (traj_data['target_obs_traj'].to(device) - target_mean) / target_std
             surrounding_feature = (traj_data['surrounding_obs_traj'].to(device) - surrounding_mean) / surrounding_std
-            lane_change_label = traj_data['lane_change_label'].to(device)
+            lane_change_label = traj_data['lane_change_label'].to(torch.long).to(device)
             intention_score = model(target_feature, surrounding_feature)
             acc = cal_acc(intention_score, lane_change_label)
             correct += int(acc * len(intention_score))
             total += len(intention_score)
             val_loss = loss_fn(intention_score, lane_change_label)
-            val_loss_sum += val_loss * len(traj_data)
+            val_loss_sum += val_loss * target_feature.shape[0]
     return val_loss_sum / len(val_dataset), correct / total    
     
     
