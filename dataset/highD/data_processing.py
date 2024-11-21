@@ -2,7 +2,7 @@
 Author: Yang Jialong
 Date: 2024-11-11 17:33:56
 LastEditors: Please set LastEditors
-LastEditTime: 2024-11-15 11:09:37
+LastEditTime: 2024-11-21 11:07:08
 Description: 请填写简介
 '''
 
@@ -13,8 +13,9 @@ import math
 import os
 from random import sample
 from tqdm import tqdm, trange
-
+from matplotlib import pyplot as plt
 from dataset.highD.utils import *
+from modules.trajectory_generator import TrajectoryGenerator
 from torch.utils.data import Dataset, random_split
 
 
@@ -183,6 +184,72 @@ class HighD(Dataset):
             else:
                 return 2
     
+    def get_left_laneId(self, lane_num, ori_lane_id):
+        if lane_num == 4:
+            if ori_lane_id == 2:
+                return 3
+            elif ori_lane_id == 6:
+                return 5
+            else:
+                return None
+        elif lane_num == 6:
+            if ori_lane_id == 2:
+                return 3
+            elif ori_lane_id == 3:
+                return 4
+            elif ori_lane_id == 8:
+                return 7
+            elif ori_lane_id == 7:
+                return 6
+            else:
+                return None
+        else:
+            if ori_lane_id == 2:
+                return 3
+            elif ori_lane_id == 3:
+                return 4
+            elif ori_lane_id == 8:
+                return 7
+            elif ori_lane_id == 7:
+                return 6
+            elif ori_lane_id == 9:
+                return 8
+            else:
+                return None
+        
+    def get_right_laneId(self, lane_num, ori_lane_id):
+        if lane_num == 4:
+            if ori_lane_id == 3:
+                return 2
+            elif ori_lane_id == 5:
+                return 6
+            else:
+                return None
+        elif lane_num == 6:
+            if ori_lane_id == 3:
+                return 2
+            elif ori_lane_id == 4:
+                return 3
+            elif ori_lane_id == 7:
+                return 8
+            elif ori_lane_id == 6:
+                return 7
+            else:
+                return None
+        else:
+            if ori_lane_id == 3:
+                return 2
+            elif ori_lane_id == 4:
+                return 3
+            elif ori_lane_id == 7:
+                return 8
+            elif ori_lane_id == 6:
+                return 7
+            elif ori_lane_id == 8:
+                return 9
+            else:
+                return None
+    
     
     def detect_lane_change(self, v_y, v_x, heading_threshold):
         if v_x != 0:
@@ -259,6 +326,7 @@ class HighD(Dataset):
     
     def construct_traj_features(self, tracks_csv, tracks_meta, id, start_frame_idx, lanes_info, driving_direction):
         target_feature = []
+        target_gt = []
         preceding_feature = []
         following_feature = []
         left_following_feature = []
@@ -287,7 +355,7 @@ class HighD(Dataset):
             target_feature_temp.append(-1 * target_track_csv[Y_ACCELERATION][i] if driving_direction == 2 else target_track_csv[Y_ACCELERATION][i])
             target_feature_temp.extend([1,0] if target_track_meta[CLASS] == 'Car' else [0,1])
             target_feature.append(target_feature_temp)
-
+    
             # preceding vehicle
             preceding_feature_temp = []
             preceding_id = target_track_csv[PRECEDING_ID][predict_frame_idx]
@@ -490,6 +558,17 @@ class HighD(Dataset):
             right_preceding_feature.append(right_preceding_feature_temp)
             i += 1
         
+        
+        # 获取目标车辆未来轨迹groundtruth
+        while (i < start_frame_idx + self.obs_len + self.pred_len):
+            target_gt_temp = []
+            target_gt_temp.append(target_track_csv[X][i] - target_track_csv[X][predict_frame_idx] if driving_direction == 2
+                                  else target_track_csv[X][predict_frame_idx] - target_track_csv[X][i])
+            target_gt_temp.append(target_track_csv[Y][i] - target_track_csv[Y][predict_frame_idx] if driving_direction == 1
+                                  else target_track_csv[Y][predict_frame_idx] - target_track_csv[Y][i])
+            i += 1
+            target_gt.append(target_gt_temp)
+        
         surrounding_feature.append(preceding_feature)
         surrounding_feature.append(following_feature)
         surrounding_feature.append(left_following_feature)
@@ -499,11 +578,30 @@ class HighD(Dataset):
         surrounding_feature.append(right_alongside_feature)
         surrounding_feature.append(right_preceding_feature)
         
-        return target_feature, surrounding_feature
-            
-        
-            
-            
+        return target_feature, surrounding_feature, target_gt
+                    
+    def construct_future_traj_feature(self, target_csv, start_frame_idx, lane_num, trajectory_generator):
+        predict_frame_idx = start_frame_idx + self.obs_len - 1
+        current_lane_id = target_csv[LANE_ID][predict_frame_idx]
+        future_traj_feature = []
+        future_lc_feature = []
+        left_laneId = self.get_left_laneId(lane_num, current_lane_id)
+        right_laneId = self.get_right_laneId(lane_num, current_lane_id)
+        if left_laneId is not None:
+            trajectory_feature = trajectory_generator.generate_future_trajectory(target_csv, start_frame_idx, left_laneId)
+            future_traj_feature.extend(trajectory_feature)
+            future_lc_feature.extend([[1., 0., 0.]] * len(trajectory_feature))
+        if right_laneId is not None:
+            trajectory_feature = trajectory_generator.generate_future_trajectory(target_csv, start_frame_idx, right_laneId)
+            future_traj_feature.extend(trajectory_feature)
+            future_lc_feature.extend([[0., 0., 1.]] * len(trajectory_feature))
+        if current_lane_id is not None:
+            trajectory_feature = trajectory_generator.generate_future_trajectory(target_csv, start_frame_idx, current_lane_id)
+            future_traj_feature.extend(trajectory_feature)
+            future_lc_feature.extend([[0., 1., 0.]] * len(trajectory_feature))      
+        print(future_lc_feature)  
+        return future_traj_feature, future_lc_feature
+    
     
     def generate_training_data(self, number):
         tracks_csv = self.read_tracks_csv(self.raw_data_dir + str(number).zfill(2) + "_tracks.csv")
@@ -553,18 +651,23 @@ class HighD(Dataset):
                 lane_changing_ids.append(key)
             else:
                 lane_keeping_ids.append(key)
-        
+        traj_generator = TrajectoryGenerator(self.obs_len, self.pred_len, lanes_info)
         #2. 获取变道轨迹的特征
         for id in tqdm(lane_changing_ids):
             lane_change_info = self.get_lane_changing_info(tracks_csv[id], lane_num)
             driving_direction = tracks_meta[id][DRIVING_DIRECTION]
-            for i in range(len(tracks_csv[id][FRAME]) - self.obs_len + 1):
-                target_feature, surroungding_feature = self.construct_traj_features(tracks_csv, tracks_meta, id, i, lanes_info, driving_direction)
+            for i in range(len(tracks_csv[id][FRAME]) - self.obs_len - self.pred_len + 1):
+                target_feature, surroungding_feature, target_gt = self.construct_traj_features(tracks_csv, tracks_meta, id, i, lanes_info, driving_direction)
+                future_traj_feature, future_lc_feature = self.construct_future_traj_feature(tracks_csv[id], i, lane_num, traj_generator)
                 lane_change_label = self.get_traj_label(i + self.obs_len - 1, lane_change_info)
                 scene_dict = {}
                 scene_dict["target_obs_traj"] = torch.tensor(target_feature) #(obs_len, feature_dim)
                 scene_dict["surrounding_obs_traj"] = torch.tensor(surroungding_feature) #(8, obs_len, feature_dim)
                 scene_dict["lane_change_label"] = torch.tensor(lane_change_label) #(1, )
+                scene_dict["future_traj_gt"] = torch.tensor(target_gt) #(pred_len, 2)
+                scene_dict["future_traj_pred"] = torch.tensor(future_traj_feature) # (n, pred_len, 2)
+                scene_dict["future_traj_intention"] = torch.tensor(future_lc_feature) # (n, 3)
+                print("len of future_traj_pred: ", len(future_traj_feature))
                 scene_list.append(scene_dict)
                 
         #3. 获取直行轨迹的特征(直行轨迹太多了，只抽一部分就行了)
@@ -573,13 +676,17 @@ class HighD(Dataset):
             
         for id in tqdm(lane_keeping_ids):
             driving_direction = tracks_meta[id][DRIVING_DIRECTION]
-            for i in range(len(tracks_csv[id][FRAME]) - self.obs_len + 1):
-                target_feature, surroungding_feature = self.construct_traj_features(tracks_csv, tracks_meta, id, i, lanes_info, driving_direction)
+            for i in range(len(tracks_csv[id][FRAME]) - self.obs_len - self.pred_len + 1):
+                target_feature, surroungding_feature, target_gt = self.construct_traj_features(tracks_csv, tracks_meta, id, i, lanes_info, driving_direction)
+                future_traj_feature, future_lc_feature = self.construct_future_traj_feature(tracks_csv[id], i, lane_num, traj_generator)
                 lane_change_label = 0.
                 scene_dict = {}
                 scene_dict["target_obs_traj"] = torch.tensor(target_feature) #(obs_len, feature_dim)
                 scene_dict["surrounding_obs_traj"] = torch.tensor(surroungding_feature) #(8, obs_len, feature_dim)
                 scene_dict["lane_change_label"] = torch.tensor(lane_change_label) #(1, )
+                scene_dict["future_traj_gt"] = torch.tensor(target_gt) #(pred_len, 2)
+                scene_dict["future_traj_pred"] = torch.tensor(future_traj_feature) # (n, pred_len, 2)
+                scene_dict["future_traj_intention"] = torch.tensor(future_lc_feature) # (n, 3)
                 scene_list.append(scene_dict)
         return scene_list
     

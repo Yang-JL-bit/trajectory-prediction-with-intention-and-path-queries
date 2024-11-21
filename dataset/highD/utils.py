@@ -2,7 +2,7 @@
 Author: Yang Jialong
 Date: 2024-11-06 20:00:09
 LastEditors: Please set LastEditors
-LastEditTime: 2024-11-18 11:00:21
+LastEditTime: 2024-11-21 10:38:54
 Description: 请填写简介
 '''
 # TRACK FILE
@@ -66,11 +66,13 @@ N_TRUCKS = "numTrucks"
 UPPER_LANE_MARKINGS = "upperLaneMarkings"
 LOWER_LANE_MARKINGS = "lowerLaneMarkings"
 
+SAMPLE_RATE = 25
+
 
 #轨迹预测采样
-MIN_LANE_CHANGE_TIME = 0.6
-MAX_LANE_CHANGE_TIME = 6
-LANE_CHANGE_SAMPLR_STEP = 0.2
+MIN_LANE_CHANGE_TIME = 1
+MAX_LANE_CHANGE_TIME = 12
+LANE_CHANGE_SAMPLR_STEP = 0.5
 
 RAW_DATA_DIR = 'C:/Users/Public/yjl/课题/code/highD/data/'
 PROCESSED_DATA_DIR = 'C:/Users/Public/yjl/课题/code/highD/processed_data_2/'
