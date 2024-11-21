@@ -2,7 +2,7 @@
 Author: Yang Jialong
 Date: 2024-11-12 10:15:12
 LastEditors: Please set LastEditors
-LastEditTime: 2024-11-12 14:56:29
+LastEditTime: 2024-11-20 15:03:03
 Description: 超参数调优
 '''
 import os
@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 from modules.model import RoadPredictionModel, train_model, test_model, val_model, cal_acc
 from dataset.highD.data_processing import HighD, split_dataset, get_label_weight, get_sample_weight, standard_normalization
 from dataset.highD.utils import RAW_DATA_DIR, PROCESSED_DATA_DIR
-from utils.json import save_hyperparams, save_tuning_process
+from utils.my_json import save_hyperparams, save_tuning_process
 from hyperopt import fmin, tpe, hp,Trials, STATUS_OK
 
 
