@@ -2,38 +2,44 @@
 Author: Yang Jialong
 Date: 2024-11-12 10:15:12
 LastEditors: Please set LastEditors
-LastEditTime: 2024-11-20 15:03:03
+LastEditTime: 2025-01-16 16:17:38
 Description: 超参数调优
 '''
 import os
-import torch 
+import json
+import torch
+import argparse
 from torch.utils.data import DataLoader 
-from modules.model import RoadPredictionModel, train_model, test_model, val_model, cal_acc
+from torch import nn
+from modules.model import RoadPredictionModel, train_model, test_model, val_model
 from dataset.highD.data_processing import HighD, split_dataset, get_label_weight, get_sample_weight, standard_normalization
-from dataset.highD.utils import RAW_DATA_DIR, PROCESSED_DATA_DIR
+from dataset.highD.utils import RAW_DATA_DIR, PROCESSED_DATA_DIR, DATASET_DIR
 from utils.my_json import save_hyperparams, save_tuning_process
 from hyperopt import fmin, tpe, hp,Trials, STATUS_OK
 
 
 if __name__ == '__main__':
+    
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--predict_length', type=int, default=3)
+    args_input = parser.parse_args()
+    processed_dir = DATASET_DIR + f'processed_data_0102_{args_input.predict_length}s/'
+    
     #数据集
     dataset = HighD(raw_data_dir = RAW_DATA_DIR, 
-                    processed_dir = PROCESSED_DATA_DIR, 
-                    obs_len = 30, 
-                    pred_len = 50, 
+                    processed_dir = processed_dir, 
+                    obs_len = 50, 
+                    pred_len = 75, 
+                    load_id=[1,2,3,4,5,6,7,8,13],
+                    under_sample=10000,
+                    traj_sample_rate=5,
                     process_data = False)
     train_set, val_set, test_set = split_dataset(dataset)
-    
+    print("数据集长度{}, {}, {}".format(len(train_set), len(val_set), len(test_set)))
     #device
-    device = None
-    if torch.cuda.is_available():
-        device = torch.device("cuda:0")  # you can continue going on here, like cuda:1 cuda:2....etc. 
-        print("Running on the GPU")
-    else:
-        device = torch.device("cpu")
-        print("Running on the CPU")
-        
-        
+    device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+    device_ids = [0, 1]
+    
     #归一化处理
     scalar = {}
     scalar["target"] = standard_normalization(torch.stack([i['target_obs_traj'] for i in train_set]))
@@ -45,16 +51,20 @@ if __name__ == '__main__':
     
     #定义搜索空间
     space = {
-        "hidden_size": hp.choice("hidden_size", [16, 32, 64, 128]),
-        "num_layers": hp.choice("num_layers", [1, 2, 3]),
-        "head_num": hp.choice("head_num", [1, 2, 4, 8]),
-        "lr": hp.choice("lr", [0.0001, 0.001, 0.01, 0.1]),
-        "epoch": hp.choice("epoch", [50, 100, 150, 200]),
-        "batch_size": hp.choice("batch_size", [32, 64, 128, 256, 512]),
-        "patience": hp.randint("patience", 10)
+        "hidden_size": hp.choice("hidden_size", [32,64,128,256]),
+        "style_size": hp.choice("style_size", [8, 16, 32, 64]),
+        "decoder_size": hp.choice("decoder_size", [64, 128, 256]),
+        "num_layers": hp.choice("num_layers", [1,2,4]),
+        "head_num": hp.choice("head_num", [1,2,4]),
+        "inputembedding_size": hp.choice("inputembedding_size", [8, 16, 32, 64, 128]), 
+        "lr": hp.choice("lr", [0.001]),
+        "epoch": hp.choice("epoch", [100, 200]),
+        "decay_rate": hp.choice("decay_rate", [0.1, 0.5, 1.0]),
+        "decay_step": hp.choice("decay_step", [10, 20, 50, 100]),
+        "batch_size": hp.choice("batch_size", [32, 64, 128, 256]),
+        "patience": hp.choice("patience", [10, 20, 30]),
     }
-    
-    save_path = './save/test/'
+    save_path = f'./save/0115_multi_model_hyperopt_horizon={args_input.predict_length}s/'
     if not os.path.exists(save_path):
         os.makedirs(save_path)
     #定义目标函数
@@ -63,23 +73,46 @@ if __name__ == '__main__':
         description: 目标函数
         return {*}
         '''        
-        model = RoadPredictionModel(obs_len=30, 
-                                input_size=10, 
-                                hidden_size=params["hidden_size"], 
-                                num_layers=params["num_layers"], 
-                                head_num=params["head_num"], 
-                                device=device)
-        train_model(train_set, val_set, model, train_sample_weight=sample_weight, scalar=scalar, val_sample_weight=val_weight, 
-                    save_path=save_path, device=device, patience=params['patience'], lr=params['lr'], epoch=params['epoch'], batch_size=params['batch_size'])
+        model = RoadPredictionModel(obs_len=10, 
+                                    pred_len=5 * args_input.predict_length,
+                                    input_size=10, 
+                                    hidden_size=params["hidden_size"], 
+                                    num_layers=params["num_layers"], 
+                                    head_num=params["head_num"],
+                                    inputembedding_size=params["inputembedding_size"],
+                                    decoder_size=params["decoder_size"],
+                                    style_size=params["style_size"],
+                                    predict_trajectory=True,
+                                    device=device,
+                                    top_k=6,)
+        #多卡并行
+        # if torch.cuda.device_count() > 1:
+        #     print(f"Let's use {torch.cuda.device_count()} GPUs!")
+        #     model = nn.DataParallel(model)
+        model.to(device)
+        train_model(train_set, val_set, model, scalar=scalar, device=device, 
+                    save_path=save_path, predict_trajectory=True,  patience=params['patience'], lr=params['lr'], epoch=params['epoch'], 
+                    batch_size=params['batch_size'], alpha=1.0, beta=1.0, decay_rate=params['decay_rate'], 
+                    decay_step=params['decay_step'])
         #验证集准确率
-        val_loss, val_acc = val_model(val_set, model, val_weight, scalar, device)
-        return {'loss': -val_acc, 'params': params, 'status': STATUS_OK}
+        model.load_state_dict(torch.load(save_path + "model.pth", map_location=device))
+        model.to(device)
+        val_ade, val_fde, val_missrate, _, _ = test_model(val_set, model, scalar, predict_trajectory=True, device=device, batch_size = 64, visulization=False)
+        
+        #实时保存结果
+        result = {
+            "params": params,
+            "ade": val_ade.item(),
+            "fde": val_fde.item(),
+            "missrate": val_missrate.item()
+        }
+        save_tuning_process(result, save_path + 'tuning_process.json')
+        return {'loss': val_ade, 'params': params, 'status': STATUS_OK}
     
     trials=Trials()
-    best = fmin(fn=objective_function, space=space, algo=tpe.suggest, max_evals=2, trials=trials)
+    best = fmin(fn=objective_function, space=space, algo=tpe.suggest, max_evals=100, trials=trials)
     print("最优参数组合为：{}".format(best))
     
     #保存结果
     trails_result = trials.results 
-    save_tuning_process(trails_result, save_path=save_path + 'tuning_process.json')
     save_hyperparams(best, save_path=save_path + 'best_hyperparams.json')

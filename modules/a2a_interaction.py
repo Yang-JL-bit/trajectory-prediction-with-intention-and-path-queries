@@ -2,7 +2,7 @@
 Author: Yang Jialong
 Date: 2024-11-11 17:33:54
 LastEditors: Please set LastEditors
-LastEditTime: 2024-11-12 10:04:03
+LastEditTime: 2025-01-10 23:11:19
 Description: 请填写简介
 '''
 import torch
@@ -23,7 +23,7 @@ class SelfAttention(nn.Module):
         self.head_num = head_num
         self.query_key_size = query_key_size
         self.value_size = value_size
-        self.init_weights()
+        # self.init_weights()
         
     def init_weights(self):
         for m in self.modules():
@@ -51,7 +51,7 @@ class SelfAttention(nn.Module):
         if attention_mask is not None:
             att = att.masked_fill(attention_mask, -np.inf)
         att = torch.softmax(att, -1)
-        att=self.dropout(att)
+        # att=self.dropout(att)
         out = torch.matmul(att, v).permute(0, 2, 1, 3).contiguous().view(b_s, nq, self.head_num * self.value_size) # (b_s, nq, h*d_v)                                                                                     # (b_s, nq, d_k)
         output = self.fc_o(out)
         return output
@@ -61,6 +61,7 @@ class A2A(nn.Module):
     def __init__(self, input_size, hidden_size, head_num) -> None:
         super(A2A,self).__init__()
         self.self_attention = SelfAttention(input_size, head_num, hidden_size, hidden_size)
+        self.self_attention_2 = nn.MultiheadAttention(hidden_size, head_num, batch_first=True, dtype=torch.float64)
         self.batch_norm = nn.BatchNorm1d(hidden_size, dtype=torch.float64)
         self.layer_norm = nn.LayerNorm(hidden_size, dtype=torch.float64)
     
@@ -70,8 +71,10 @@ class A2A(nn.Module):
         surrounding_feature: 周围车辆的特征 (bs, n_agent, feature_size)
         """
         target_feature = target_feature.unsqueeze(1)
-        target_feature = self.self_attention(target_feature, surrounding_feature, surrounding_feature) + target_feature
+        attention_out, _ = self.self_attention_2(target_feature, surrounding_feature, surrounding_feature)
+        target_feature = target_feature + attention_out
         return self.layer_norm(target_feature.squeeze(1))
+        # return self.layer_norm(target_feature.squeeze(1))
 
 # q = torch.randn([16, 1, 10])
 # k = torch.randn([16, 3, 10])

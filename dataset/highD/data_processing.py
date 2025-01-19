@@ -2,45 +2,70 @@
 Author: Yang Jialong
 Date: 2024-11-11 17:33:56
 LastEditors: Please set LastEditors
-LastEditTime: 2024-11-21 11:07:08
+LastEditTime: 2025-01-10 09:41:12
 Description: 请填写简介
 '''
 
 import pandas as pd
 import numpy as np
 import torch
+import random
+import torch.nn.functional as F
 import math
 import os
 from random import sample
 from tqdm import tqdm, trange
 from matplotlib import pyplot as plt
 from dataset.highD.utils import *
-from modules.trajectory_generator import TrajectoryGenerator
+from modules.trajectory_generator import TrajectoryGenerator, trajectory_generator_by_torch
 from torch.utils.data import Dataset, random_split
 
 
 class HighD(Dataset):
-    def __init__(self, raw_data_dir, processed_dir, obs_len, pred_len, process_data = False, heading_threshold = 0.01) -> None:
+    def __init__(self, raw_data_dir, processed_dir, obs_len, pred_len, process_id = [13], load_id = [13], process_data = False, heading_threshold = 0.01, under_sample = None, traj_sample_rate = None) -> None:
         super().__init__()
         self.raw_data_dir = raw_data_dir
         self.processed_dir = processed_dir
         self.obs_len = obs_len
         self.pred_len = pred_len
         self.heading_threshold = heading_threshold
+        self.traj_sample_rate = traj_sample_rate
         self.scene_data_list = []
         if process_data:
-            for i in tqdm(range(1, 61, 1), desc='Processing data'):
+            for i in tqdm(process_id, desc='Processing data'):
+                print("Processing scene: ", i)
                 scene_data = self.generate_training_data(i)
-                self.scene_data_list.extend(scene_data)
-                torch.save(scene_data, processed_dir + 'data_{}.pt'.format(i))
-                break
+                # self.scene_data_list.extend(scene_data)
+                torch.save(scene_data, processed_dir + 'data_{}_0102_3s.pt'.format(i))
             print("数据处理完毕")
         else:
             file_list = os.listdir(processed_dir)
-            for file in tqdm(file_list):
+            load_file_list = [file for file in file_list if (any(str(id) in file[0:7] for id in load_id))]
+            load_file_list = sorted(load_file_list, key=lambda x: int(x.split('_')[1]))
+            #输出所有加载的文件
+            print("Will load files: ")
+            self.maps_info = {}
+            self.dataset_pointer = []
+            for file in load_file_list:
+                print(file, )
+            for file in tqdm(load_file_list):
                 scene_data = torch.load(processed_dir + file)
+                # id = int(file.split('_')[1])
+                # recording_meta = self.read_recording_meta(self.raw_data_dir + str(id).zfill(2) + "_recordingMeta.csv")
+                # lane_num = len(recording_meta[UPPER_LANE_MARKINGS]) + \
+                #     len(recording_meta[LOWER_LANE_MARKINGS]) - 2
+                # lanes_info = self.get_lanes_info(lane_num, recording_meta)
+                # self.maps_info[id] = lanes_info
+                # scene_data = torch.load(processed_dir + file)
+                # scene_data = [{**scene, "dataset_pointer": id} for scene in scene_data]
+                # scene_data = [{**scene, "driving_direction": torch.tensor(self.get_driving_direcion_by_pos(scene["origin_feature"][1], lanes_info))} for scene in scene_data]
                 self.scene_data_list.extend(scene_data)
-                break
+                if under_sample is not None:
+                    print("Under sampling...")
+                    self.scene_data_list = self.under_sample_dataset(under_sample)  #每读取一个文件就，降采样一次，要不然会爆内存
+            if under_sample is not None:    
+                print("Under sampling...")
+                self.scene_data_list = self.under_sample_dataset(under_sample)
             print("数据加载完毕")
     def __getitem__(self, id):
         return self.scene_data_list[id]
@@ -48,7 +73,32 @@ class HighD(Dataset):
     def __len__(self):
         return len(self.scene_data_list)
     
-    
+    def get_driving_direcion_by_pos(self, pos_y, lanes_info):
+        #判断该店落在哪条车道上
+        lane_num = len(lanes_info)
+        lane_id = None
+        for id, lane_boundaries in lanes_info.items():
+            left_boundary, center_lane, right_boundary = lane_boundaries
+            if left_boundary <= pos_y <= right_boundary:
+                lane_id = id
+                break
+        if lane_id is None:
+            min_distance = float('inf')
+            for id, lane_boundaries in lanes_info.items():
+                left_boundary, center_lane, right_boundary = lane_boundaries
+                # 计算 pos_y 与车道中心线的距离
+                distance = abs(pos_y - center_lane)
+                if distance < min_distance:
+                    min_distance = distance
+                    lane_id = id
+        if lane_num == 4:
+            return 1 if lane_id < 4 else 2
+        elif lane_num == 6:
+            return 1 if lane_id < 5 else 2
+        elif lane_num == 7:
+            return 1 if lane_id < 5 else 2
+        
+        
     def read_tracks_csv(self, track_csv_path):
         """
         This method reads the tracks file from highD data.
@@ -99,7 +149,44 @@ class HighD(Dataset):
             current_track = current_track + 1
         return tracks
 
-
+    def get_lanes_info(self, lane_num, recording_meta):
+        lanes_info = {}
+        lane_num = len(recording_meta[UPPER_LANE_MARKINGS]) + \
+            len(recording_meta[LOWER_LANE_MARKINGS]) - 2
+        if lane_num == 4:
+            # 4 lanes
+            lanes_info[2] = [recording_meta[UPPER_LANE_MARKINGS][0], (recording_meta[UPPER_LANE_MARKINGS][0] + recording_meta[UPPER_LANE_MARKINGS][1]) / 2, recording_meta[UPPER_LANE_MARKINGS][1]]
+            lanes_info[3] = [recording_meta[UPPER_LANE_MARKINGS][1], (recording_meta[UPPER_LANE_MARKINGS][1] + recording_meta[UPPER_LANE_MARKINGS][2]) / 2, recording_meta[UPPER_LANE_MARKINGS][2]]
+            lanes_info[5] = [recording_meta[LOWER_LANE_MARKINGS][0], (recording_meta[LOWER_LANE_MARKINGS][0] + recording_meta[LOWER_LANE_MARKINGS][1]) / 2, recording_meta[LOWER_LANE_MARKINGS][1]]
+            lanes_info[6] = [recording_meta[LOWER_LANE_MARKINGS][1], (recording_meta[LOWER_LANE_MARKINGS][1] + recording_meta[LOWER_LANE_MARKINGS][2]) / 2, recording_meta[LOWER_LANE_MARKINGS][2]]
+            # lane_width = ((lanes_info[3] - lanes_info[2]) +
+            #             (lanes_info[6] - lanes_info[5])) / 2
+        elif lane_num == 6:
+            # 6 lanes
+            lanes_info[2] = [recording_meta[UPPER_LANE_MARKINGS][0], (recording_meta[UPPER_LANE_MARKINGS][0] + recording_meta[UPPER_LANE_MARKINGS][1]) / 2, recording_meta[UPPER_LANE_MARKINGS][1]]
+            lanes_info[3] = [recording_meta[UPPER_LANE_MARKINGS][1], (recording_meta[UPPER_LANE_MARKINGS][1] + recording_meta[UPPER_LANE_MARKINGS][2]) / 2, recording_meta[UPPER_LANE_MARKINGS][2]]
+            lanes_info[4] = [recording_meta[UPPER_LANE_MARKINGS][2], (recording_meta[UPPER_LANE_MARKINGS][2] + recording_meta[UPPER_LANE_MARKINGS][3]) / 2, recording_meta[UPPER_LANE_MARKINGS][3]]
+            lanes_info[6] = [recording_meta[LOWER_LANE_MARKINGS][0], (recording_meta[LOWER_LANE_MARKINGS][0] + recording_meta[LOWER_LANE_MARKINGS][1]) / 2, recording_meta[LOWER_LANE_MARKINGS][1]]
+            lanes_info[7] = [recording_meta[LOWER_LANE_MARKINGS][1], (recording_meta[LOWER_LANE_MARKINGS][1] + recording_meta[LOWER_LANE_MARKINGS][2]) / 2, recording_meta[LOWER_LANE_MARKINGS][2]]
+            lanes_info[8] = [recording_meta[LOWER_LANE_MARKINGS][2], (recording_meta[LOWER_LANE_MARKINGS][2] + recording_meta[LOWER_LANE_MARKINGS][3]) / 2, recording_meta[LOWER_LANE_MARKINGS][3]]
+            # lane_width = ((lanes_info[3] - lanes_info[2]) + (lanes_info[4] - lanes_info[3]) +
+            #             (lanes_info[7] - lanes_info[6]) + (lanes_info[8] - lanes_info[7])) / 4
+        elif lane_num == 7:
+            # 7 lanes: track 58 ~ 60
+            lanes_info[2] = [recording_meta[UPPER_LANE_MARKINGS][0], (recording_meta[UPPER_LANE_MARKINGS][0] + recording_meta[UPPER_LANE_MARKINGS][1]) / 2, recording_meta[UPPER_LANE_MARKINGS][1]]
+            lanes_info[3] = [recording_meta[UPPER_LANE_MARKINGS][1], (recording_meta[UPPER_LANE_MARKINGS][1] + recording_meta[UPPER_LANE_MARKINGS][2]) / 2, recording_meta[UPPER_LANE_MARKINGS][2]]
+            lanes_info[4] = [recording_meta[UPPER_LANE_MARKINGS][2], (recording_meta[UPPER_LANE_MARKINGS][2] + recording_meta[UPPER_LANE_MARKINGS][3]) / 2, recording_meta[UPPER_LANE_MARKINGS][3]]
+            lanes_info[5] = [recording_meta[UPPER_LANE_MARKINGS][3], (recording_meta[UPPER_LANE_MARKINGS][3] + recording_meta[UPPER_LANE_MARKINGS][4]) / 2, recording_meta[UPPER_LANE_MARKINGS][4]]
+            lanes_info[7] = [recording_meta[LOWER_LANE_MARKINGS][0], (recording_meta[LOWER_LANE_MARKINGS][0] + recording_meta[LOWER_LANE_MARKINGS][1]) / 2, recording_meta[LOWER_LANE_MARKINGS][1]]
+            lanes_info[8] = [recording_meta[LOWER_LANE_MARKINGS][1], (recording_meta[LOWER_LANE_MARKINGS][1] + recording_meta[LOWER_LANE_MARKINGS][2]) / 2, recording_meta[LOWER_LANE_MARKINGS][2]]
+            lanes_info[9] = [recording_meta[LOWER_LANE_MARKINGS][2], (recording_meta[LOWER_LANE_MARKINGS][2] + recording_meta[LOWER_LANE_MARKINGS][3]) / 2, recording_meta[LOWER_LANE_MARKINGS][3]]
+            # lane_width = ((lanes_info[3] - lanes_info[2]) + (lanes_info[4] - lanes_info[3]) + (
+            #     lanes_info[5] - lanes_info[4]) + (lanes_info[8] - lanes_info[7]) + (lanes_info[9] - lanes_info[8])) / 5
+        else:
+            print("Error: Invalid input!")
+        return lanes_info
+    
+    
     def read_tracks_meta(self, tracks_meta_path):
         """
         This method reads the static info file from highD data.
@@ -327,6 +414,8 @@ class HighD(Dataset):
     def construct_traj_features(self, tracks_csv, tracks_meta, id, start_frame_idx, lanes_info, driving_direction):
         target_feature = []
         target_gt = []
+        origin_feature = []
+        centerline_info = []
         preceding_feature = []
         following_feature = []
         left_following_feature = []
@@ -339,8 +428,13 @@ class HighD(Dataset):
         target_track_csv = tracks_csv[id]
         target_track_meta = tracks_meta[id]
         predict_frame_idx = start_frame_idx + self.obs_len - 1
+        while ((predict_frame_idx - start_frame_idx) % self.traj_sample_rate != 0):
+            predict_frame_idx = predict_frame_idx - 1
         i = start_frame_idx
         while (i < start_frame_idx + self.obs_len):
+            if ((i - start_frame_idx) % self.traj_sample_rate != 0):
+                i += 1
+                continue
             # 自身特征
             target_feature_temp = []
             target_feature_temp.append(target_track_csv[X][i] - target_track_csv[X][predict_frame_idx] if driving_direction == 2
@@ -561,13 +655,37 @@ class HighD(Dataset):
         
         # 获取目标车辆未来轨迹groundtruth
         while (i < start_frame_idx + self.obs_len + self.pred_len):
+            if ((i - start_frame_idx - self.obs_len) % self.traj_sample_rate != 0):
+                i += 1
+                continue
             target_gt_temp = []
             target_gt_temp.append(target_track_csv[X][i] - target_track_csv[X][predict_frame_idx] if driving_direction == 2
                                   else target_track_csv[X][predict_frame_idx] - target_track_csv[X][i])
-            target_gt_temp.append(target_track_csv[Y][i] - target_track_csv[Y][predict_frame_idx] if driving_direction == 1
+            target_gt_temp.append(target_track_csv[Y][i] - target_track_csv[Y][predict_frame_idx]if driving_direction == 1
                                   else target_track_csv[Y][predict_frame_idx] - target_track_csv[Y][i])
             i += 1
             target_gt.append(target_gt_temp)
+        
+        
+        # 获取目标车辆预测原点特征
+        origin_feature.append(target_track_csv[X][predict_frame_idx] + target_track_csv[WIDTH][predict_frame_idx] / 2)
+        origin_feature.append(target_track_csv[Y][predict_frame_idx] + target_track_csv[HEIGHT][predict_frame_idx] / 2)
+        origin_feature.append(target_track_csv[X_VELOCITY][predict_frame_idx])
+        origin_feature.append(target_track_csv[Y_VELOCITY][predict_frame_idx])
+        origin_feature.append(target_track_csv[X_ACCELERATION][predict_frame_idx])
+        origin_feature.append(target_track_csv[Y_ACCELERATION][predict_frame_idx])
+        
+        #获取目标车辆左侧车道、当前车道以及右侧车道的车道中心线坐标
+        cur_laneId = target_track_csv[LANE_ID][predict_frame_idx]
+        if self.get_left_laneId(len(lanes_info), cur_laneId) is not None:
+            centerline_info.append(lanes_info[self.get_left_laneId(len(lanes_info), cur_laneId)][1])
+        else:
+            centerline_info.append(-1)
+        centerline_info.append(lanes_info[cur_laneId][1])
+        if self.get_right_laneId(len(lanes_info), cur_laneId) is not None:
+            centerline_info.append(lanes_info[self.get_right_laneId(len(lanes_info), cur_laneId)][1])
+        else:
+            centerline_info.append(-1) 
         
         surrounding_feature.append(preceding_feature)
         surrounding_feature.append(following_feature)
@@ -578,7 +696,7 @@ class HighD(Dataset):
         surrounding_feature.append(right_alongside_feature)
         surrounding_feature.append(right_preceding_feature)
         
-        return target_feature, surrounding_feature, target_gt
+        return target_feature, surrounding_feature, target_gt, origin_feature, centerline_info
                     
     def construct_future_traj_feature(self, target_csv, start_frame_idx, lane_num, trajectory_generator):
         predict_frame_idx = start_frame_idx + self.obs_len - 1
@@ -588,20 +706,68 @@ class HighD(Dataset):
         left_laneId = self.get_left_laneId(lane_num, current_lane_id)
         right_laneId = self.get_right_laneId(lane_num, current_lane_id)
         if left_laneId is not None:
-            trajectory_feature = trajectory_generator.generate_future_trajectory(target_csv, start_frame_idx, left_laneId)
+            trajectory_feature = trajectory_generator.generate_future_trajectory(target_csv, start_frame_idx, left_laneId, self.traj_sample_rate)
             future_traj_feature.extend(trajectory_feature)
             future_lc_feature.extend([[1., 0., 0.]] * len(trajectory_feature))
         if right_laneId is not None:
-            trajectory_feature = trajectory_generator.generate_future_trajectory(target_csv, start_frame_idx, right_laneId)
+            trajectory_feature = trajectory_generator.generate_future_trajectory(target_csv, start_frame_idx, right_laneId, self.traj_sample_rate)
             future_traj_feature.extend(trajectory_feature)
             future_lc_feature.extend([[0., 0., 1.]] * len(trajectory_feature))
         if current_lane_id is not None:
-            trajectory_feature = trajectory_generator.generate_future_trajectory(target_csv, start_frame_idx, current_lane_id)
+            trajectory_feature = trajectory_generator.generate_future_trajectory(target_csv, start_frame_idx, current_lane_id, self.traj_sample_rate)
             future_traj_feature.extend(trajectory_feature)
             future_lc_feature.extend([[0., 1., 0.]] * len(trajectory_feature))      
-        print(future_lc_feature)  
-        return future_traj_feature, future_lc_feature
+        
+        # 将future_traj_feature 和 future_lc_feature padding成固定长度(70)
+        mask = [1] * len(future_traj_feature) + [0] * (70 - len(future_traj_feature))
+        future_traj_feature.extend([[[0., 0.]] * (self.pred_len // self.traj_sample_rate)] * (70 - len(future_traj_feature)))
+        future_lc_feature.extend([[0., 0., 0.]] * (70 - len(future_lc_feature)))
+         
+        return future_traj_feature, future_lc_feature, mask
     
+    
+    def cal_candidate_trajectory_score(self, candidate_trajectory: torch.Tensor, groundtruth: torch.Tensor, mask):
+        distances = torch.norm(candidate_trajectory - groundtruth.unsqueeze(0).repeat(candidate_trajectory.shape[0], 1, 1), dim=2)
+        cumulative_error = distances.sum(dim=1)
+        valid_cumulative_error = cumulative_error * mask.float()
+        valid_cumulative_error[mask == 0] = float('inf')
+        scores = F.softmax(-valid_cumulative_error, dim=0)
+        scores = scores * mask.float()
+        valid_scores_sum = scores.sum()  # 计算有效轨迹的分数总和
+        if valid_scores_sum > 0:
+            scores = scores / valid_scores_sum  # 归一化
+        return scores
+    
+    
+    def plot_scene(self, lane_info, target_track_csv, start_frame_idx, origin_feature, centerline_info):
+        target_gt = []
+        i = start_frame_idx + self.obs_len
+        while (i < start_frame_idx + self.obs_len + self.pred_len):
+            if ((i - start_frame_idx - self.obs_len) % self.traj_sample_rate != 0):
+                i += 1
+                continue
+            target_gt_temp = []
+            target_gt_temp.append(target_track_csv[X][i] + target_track_csv[WIDTH][i] / 2)
+            target_gt_temp.append(target_track_csv[Y][i] + target_track_csv[HEIGHT][i] / 2)
+            i += 1
+            target_gt.append(target_gt_temp)
+        lanes_line = []
+        start_x = target_track_csv[X][start_frame_idx + self.obs_len] - 150
+        end_x = target_track_csv[X][start_frame_idx + self.obs_len] + 150
+        line_space_x = np.linspace(start_x, end_x, 200)
+        traj_pred = trajectory_generator_by_torch(origin_feature, centerline_info, 
+                                                  torch.tensor([[0,1, 0]]), 
+                                                  torch.linspace(0.5 ,10, 20, dtype=torch.float64).unsqueeze(0),
+                                                  n_pred=15, dt = 0.2)[0]
+        fig, ax = plt.subplots()
+        for lane_id, laneline in lane_info.items():
+            ax.plot(line_space_x, np.ones_like(line_space_x) * laneline[0], color = 'black')
+            ax.plot(line_space_x, np.ones_like(line_space_x) * laneline[2], color = 'black')
+        ax.plot(np.array(target_gt)[:, 0], np.array(target_gt)[:, 1], color = 'red')
+        for traj in traj_pred:
+            ax.plot(traj[:, 0], traj[:, 1], color = 'green')
+        ax.invert_yaxis()
+        plt.show()
     
     def generate_training_data(self, number):
         tracks_csv = self.read_tracks_csv(self.raw_data_dir + str(number).zfill(2) + "_tracks.csv")
@@ -657,39 +823,70 @@ class HighD(Dataset):
             lane_change_info = self.get_lane_changing_info(tracks_csv[id], lane_num)
             driving_direction = tracks_meta[id][DRIVING_DIRECTION]
             for i in range(len(tracks_csv[id][FRAME]) - self.obs_len - self.pred_len + 1):
-                target_feature, surroungding_feature, target_gt = self.construct_traj_features(tracks_csv, tracks_meta, id, i, lanes_info, driving_direction)
-                future_traj_feature, future_lc_feature = self.construct_future_traj_feature(tracks_csv[id], i, lane_num, traj_generator)
+                target_feature, surroungding_feature, target_gt, origin_feature, centerline_info = self.construct_traj_features(tracks_csv, tracks_meta, id, i, lanes_info, driving_direction)
+                future_traj_feature, future_lc_feature, mask = self.construct_future_traj_feature(tracks_csv[id], i, lane_num, traj_generator)
                 lane_change_label = self.get_traj_label(i + self.obs_len - 1, lane_change_info)
                 scene_dict = {}
                 scene_dict["target_obs_traj"] = torch.tensor(target_feature) #(obs_len, feature_dim)
                 scene_dict["surrounding_obs_traj"] = torch.tensor(surroungding_feature) #(8, obs_len, feature_dim)
                 scene_dict["lane_change_label"] = torch.tensor(lane_change_label) #(1, )
                 scene_dict["future_traj_gt"] = torch.tensor(target_gt) #(pred_len, 2)
-                scene_dict["future_traj_pred"] = torch.tensor(future_traj_feature) # (n, pred_len, 2)
-                scene_dict["future_traj_intention"] = torch.tensor(future_lc_feature) # (n, 3)
-                print("len of future_traj_pred: ", len(future_traj_feature))
-                scene_list.append(scene_dict)
+                scene_dict["origin_feature"] = torch.tensor(origin_feature) #(6,)
+                scene_dict["centerline_info"] = torch.tensor(centerline_info)
+                # self.plot_scene(lanes_info, tracks_csv[id], i, 
+                #                 scene_dict["origin_feature"].unsqueeze(0), scene_dict["centerline_info"].unsqueeze(0))
+                scene_dict["future_traj_pred"] = torch.tensor(future_traj_feature) # (70, pred_len, 2)
+                scene_dict["future_traj_intention"] = torch.tensor(future_lc_feature) # (70, 3)
+                scene_dict["future_traj_mask"] = torch.tensor(mask) #(70, )
                 
+                # scene_dict["future_traj_score"] = self.cal_candidate_trajectory_score(scene_dict["future_traj_pred"], scene_dict["future_traj_gt"], scene_dict["future_traj_mask"])
+                scene_list.append(scene_dict)
+                # for i in range(scene_dict["future_traj_pred"].shape[0]):
+                #     color = None
+                #     if scene_dict["future_traj_intention"][i, 0] == 1:
+                #         color = 'blue'
+                #     elif scene_dict["future_traj_intention"][i, 1] == 1:
+                #         color = 'red'
+                #     elif scene_dict["future_traj_intention"][i, 2] == 1:
+                #         color = 'green'
+                #     plt.plot(scene_dict["future_traj_pred"][i, :, 0], scene_dict["future_traj_pred"][i, :, 1], color = color)
+                # plt.plot(np.array(scene_dict["future_traj_gt"])[:, 0], np.array(scene_dict["future_traj_gt"])[:, 1], color = 'black')
+                # plt.show()
         #3. 获取直行轨迹的特征(直行轨迹太多了，只抽一部分就行了)
         if len(lane_keeping_ids) > 100:
+            random.seed(12345)
             lane_keeping_ids = sample(lane_keeping_ids, 100)
             
         for id in tqdm(lane_keeping_ids):
             driving_direction = tracks_meta[id][DRIVING_DIRECTION]
             for i in range(len(tracks_csv[id][FRAME]) - self.obs_len - self.pred_len + 1):
-                target_feature, surroungding_feature, target_gt = self.construct_traj_features(tracks_csv, tracks_meta, id, i, lanes_info, driving_direction)
-                future_traj_feature, future_lc_feature = self.construct_future_traj_feature(tracks_csv[id], i, lane_num, traj_generator)
+                target_feature, surroungding_feature, target_gt, origin_feature, centerline_info = self.construct_traj_features(tracks_csv, tracks_meta, id, i, lanes_info, driving_direction)
+                future_traj_feature, future_lc_feature, mask = self.construct_future_traj_feature(tracks_csv[id], i, lane_num, traj_generator)
                 lane_change_label = 0.
                 scene_dict = {}
                 scene_dict["target_obs_traj"] = torch.tensor(target_feature) #(obs_len, feature_dim)
                 scene_dict["surrounding_obs_traj"] = torch.tensor(surroungding_feature) #(8, obs_len, feature_dim)
                 scene_dict["lane_change_label"] = torch.tensor(lane_change_label) #(1, )
                 scene_dict["future_traj_gt"] = torch.tensor(target_gt) #(pred_len, 2)
-                scene_dict["future_traj_pred"] = torch.tensor(future_traj_feature) # (n, pred_len, 2)
-                scene_dict["future_traj_intention"] = torch.tensor(future_lc_feature) # (n, 3)
+                scene_dict["origin_feature"] = torch.tensor(origin_feature)
+                scene_dict["centerline_info"] = torch.tensor(centerline_info)
+                scene_dict["future_traj_pred"] = torch.tensor(future_traj_feature) # (70, pred_len, 2)
+                scene_dict["future_traj_intention"] = torch.tensor(future_lc_feature) # (70, 3)
+                scene_dict["future_traj_mask"] = torch.tensor(mask) #(70, )
                 scene_list.append(scene_dict)
         return scene_list
     
+    def under_sample_dataset(self, n):
+        random.seed(42)
+        class_0 = [data for data in self.scene_data_list if data['lane_change_label'] == 0]
+        class_1 = [data for data in self.scene_data_list if data['lane_change_label'] == 1]
+        class_2 = [data for data in self.scene_data_list if data['lane_change_label'] == 2]
+        min_samples = min(len(class_0), len(class_1), len(class_2), n)
+        print(f'Min samples: {min_samples}')
+        class_0_sampled = random.sample(class_0, min_samples)
+        class_1_sampled = random.sample(class_1, min_samples)    
+        class_2_sampled = random.sample(class_2, min_samples)
+        return class_0_sampled + class_1_sampled + class_2_sampled
 def get_label_weight(scene_list):
     label_num = [0, 0, 0]
     for scene in scene_list:

@@ -2,7 +2,7 @@
 Author: Yang Jialong
 Date: 2024-11-12 11:13:49
 LastEditors: Please set LastEditors
-LastEditTime: 2024-11-12 14:55:20
+LastEditTime: 2024-12-15 11:29:34
 Description: json文件相关
 '''
 
@@ -26,6 +26,7 @@ def save_hyperparams(best_params, save_path):
     with open(save_path, "w") as f:
         json.dump(results, f, indent=4, default=str)
         
-def save_tuning_process(trails, save_path):
-    with open(save_path, "w") as f:
-        json.dump(trails, f, indent=4, default=str)
+def save_tuning_process(result, save_path):
+    with open(save_path, "a") as f:
+        json.dump(result, f, indent=4, default=str)
+        f.write('\n')  # 每个结果一行

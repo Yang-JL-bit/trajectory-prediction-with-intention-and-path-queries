@@ -1,3 +1,9 @@
+'''
+Author: Yang Jialong
+Date: 2024-11-11 17:33:56
+LastEditTime: 2025-01-16 06:43:55
+Description: 请填写简介
+'''
 import torch
 import numpy as np
 
@@ -29,7 +35,7 @@ class EarlyStopping:
             self.save_checkpoint(val_loss, model)
         elif score < self.best_score + self.delta:
             self.counter += 1
-            print(f'EarlyStopping counter: {self.counter} out of {self.patience}')
+            print(f'EarlyStopping counter: {self.counter} out of {self.patience}, validation_loss: {val_loss} < best_score: {-1 * self.best_score}')
             if self.counter >= self.patience:
                 self.early_stop = True
         else:
@@ -42,5 +48,9 @@ class EarlyStopping:
         if self.verbose:
             print(f'Validation loss decreased ({self.val_loss_min:.6f} --> {val_loss:.6f}).  Saving model ...')
         #模型保存
-        torch.save(model, self.save_path + 'model.pth')
+        if self.save_path is not None:
+            if isinstance(model, torch.nn.DataParallel):
+                torch.save(model.module.state_dict(), self.save_path + 'model.pth')
+            else:
+                torch.save(model.state_dict(), self.save_path + 'model.pth')
         self.val_loss_min = val_loss
