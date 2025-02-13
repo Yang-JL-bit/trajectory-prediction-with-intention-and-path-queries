@@ -14,7 +14,7 @@ def cal_intention_acc(pred, label):
 
 
 def cal_traj_acc(traj_score_pred, candidate_traj,  traj_gt, candidate_traj_mask):
-    traj_distances = torch.norm(candidate_traj - traj_gt.unsqueeze(1), dim=-1).sum(dim=-1)  # 路径上所有点的 L2 距离
+    traj_distances = torch.norm(candidate_traj - traj_gt.unsqueeze(1), dim=-1)[:,:,-1]  # 路径上所有点的 L2 距离
     # 找到最接近真实轨迹的轨迹索引
     closest_traj_idx = torch.argmin(traj_distances + (1 - candidate_traj_mask) * 1e6, dim=1)
     traj_score_pred = traj_score_pred + (candidate_traj_mask - 1)  * 1e9

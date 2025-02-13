@@ -10,7 +10,7 @@ from torch import nn
 import torch
 import random
 import argparse
-from torch.utils.data import DataLoader 
+from torch.utils.data import DataLoader, Subset
 from modules.model import RoadPredictionModel, test_model, val_model
 from dataset.highD.data_processing import HighD, split_dataset, get_label_weight, get_sample_weight, standard_normalization
 from dataset.highD.utils import RAW_DATA_DIR, PROCESSED_DATA_DIR, DATASET_DIR
@@ -18,6 +18,7 @@ from modules.trajectory_generator import trajectory_generator_by_torch
 import torch.nn.functional as F
 from matplotlib import pyplot as plt
 import numpy as np
+from modules.traj_cluster import cluster_trajectories, cluster_last_points_by_label
 from modules.metrics import cal_minADE, cal_minFDE, cal_miss_rate
 torch.set_printoptions(threshold=np.inf)
 
@@ -25,10 +26,10 @@ if __name__ == '__main__':
     
     
     parser = argparse.ArgumentParser()
-    parser.add_argument('--predict_length', type=int, default=3)
+    parser.add_argument('--predict_length', type=int, default=8)
     args_input = parser.parse_args()
     processed_dir = DATASET_DIR + f'processed_data_0102_{args_input.predict_length}s/'
-    
+    print(args_input.predict_length)
     #数据集
     dataset = HighD(raw_data_dir = RAW_DATA_DIR, 
                     processed_dir = processed_dir, 
@@ -47,30 +48,46 @@ if __name__ == '__main__':
     scalar["surrounding"] = standard_normalization(torch.stack([i['surrounding_obs_traj'] for i in train_set]))
     
     #device
-    device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     device_ids = [0, 1]
     
     #是否预测轨迹
     predict_trajectory = True
-  
     #加载模型
     top_k = 6
+    #driving style prior
+    use_driving_style_prior = True
+    use_trajectory_prior = True
+    use_endpoint_prior = False
+    if use_driving_style_prior:
+        sample_size = 5000
+        random.seed(100) #traj
+        # random.seed(42)  #endpoint
+        indices = random.sample(range(len(train_set)), sample_size)  # 随机选择索引
+        sub_trainset = Subset(train_set, indices)  # 创建子集
+        driving_style_prior = cluster_trajectories(sub_trainset, num_clusters=top_k)
+        print("finish clustering!")
+    else:
+        driving_style_prior = None
+
     model = RoadPredictionModel(obs_len=10,
                                 pred_len=5 * args_input.predict_length,
-                                inputembedding_size=16,
+                                inputembedding_size=64,
                                 input_size=10, 
-                                hidden_size=256,
-                                num_layers=2, 
-                                head_num=1, 
+                                hidden_size=64,
+                                num_layers=1, 
+                                head_num=2, 
                                 style_size=64,
                                 decoder_size=256,
                                 predict_trajectory=predict_trajectory,
                                 refinement_num=1,
                                 top_k=top_k,
                                 dt = 0.2,
-                                device=device)
+                                device=device,
+                                use_traj_prior=use_trajectory_prior,
+                                use_endpoint_prior=use_endpoint_prior)
     
-    model.load_state_dict(torch.load(f"./save/0118_training_horizon={args_input.predict_length}s/model.pth", map_location=device))
+    model.load_state_dict(torch.load(f"models\\ablations\\add_traj_prior\\model.pth", map_location=device))
     model.to(device)
     #模型测试
     # label_weight = get_label_weight(dataset)
@@ -79,7 +96,8 @@ if __name__ == '__main__':
     # val_weight = get_sample_weight(val_set, label_weight)
     minADE, minFDE, miss_rate, offroad_rate, offkinametic_rate =  test_model(test_set, model,scalar, 
                                                                             predict_trajectory=predict_trajectory, 
-                                                                            batch_size=256,
+                                                                            driving_style_prior=driving_style_prior,
+                                                                            batch_size=64,
                                                                             device = device, visulization=False, top_k=top_k)
     print(f"ADE is {minADE}, FDE is {minFDE}, MISS RATE is {miss_rate * 100}%")
     print(f"OFFROAD RATE is {offroad_rate * 100}%")

@@ -237,33 +237,63 @@ class TrajectoryGenerator:
 
     
             
-class TrajectoryRefinement(nn.Module):
-    def __init__(self, input_size, hidden_size, num_layers, refinement_radius = 0.4) -> None:
-        super(TrajectoryRefinement, self).__init__()
+class TrajectoryDecoder(nn.Module):
+    def __init__(self, input_size, driving_style_hidden_size, hidden_size, num_layers, n_predict, use_traj_prior = False, use_endpoint_prior = False) -> None:
+        super(TrajectoryDecoder, self).__init__()
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.num_layers = num_layers
-        self.refinement_radius = refinement_radius
+        self.n_predict = n_predict
+        self.driving_style_hidden_size = driving_style_hidden_size
+        self.driving_style = nn.Parameter(torch.randn(1, n_predict, driving_style_hidden_size, dtype=torch.float64))
         self.lstm_layer = nn.LSTM(input_size=input_size, hidden_size=hidden_size, num_layers=num_layers, batch_first=True, dtype=torch.float64)
-        self.residual_output_layer = nn.Linear(hidden_size, 2, dtype=torch.float64)
-    
+        self.traj_head = nn.Linear(hidden_size, 2, dtype=torch.float64)
+        self.trajprob_head = nn.Sequential(
+                nn.Linear(input_size, self.hidden_size, dtype=torch.float64),
+                nn.LeakyReLU(0.1),
+                nn.Linear(self.hidden_size, 1, dtype=torch.float64),
+            )
+        #自注意力机制
+        self.mode2mode_att = nn.MultiheadAttention(embed_dim=self.input_size, num_heads=1, batch_first=True, dtype=torch.float64)
+        if use_traj_prior or use_endpoint_prior:
+            if use_traj_prior and not use_endpoint_prior:
+                self.driving_style_generator = nn.LSTM(input_size=2, 
+                                                       hidden_size=self.driving_style_hidden_size, 
+                                                       num_layers=num_layers, 
+                                                       batch_first=True, 
+                                                       dtype=torch.float64)
+            elif use_endpoint_prior and not use_traj_prior:
+                self.driving_style_generator = nn.Sequential(nn.Linear(2, self.driving_style_hidden_size, dtype=torch.float64))
+            else:
+                raise ValueError("use_traj_prior and use_endpoint_prior cannot be both True")
     
     '''
-    description: 给每条候选轨迹进行微调
+    description: 给每条候选轨迹进行解码
     param {*} self
     param {*} obs_feature  车辆的历史观测特征 (bs, hidden_dim)
-    param {*} candidate_trajectory  (bs, pred_len, 2)
     return {*} 微调后的轨迹
     '''
-    def forward(self, obs_feature, candidate_trajectory):
-        # 使用obs_feature初始化lstm的hidden state, cell_state
-        obs_feature_temp = obs_feature.repeat(1, int(candidate_trajectory.shape[0] / obs_feature.shape[0])).reshape(-1, obs_feature.shape[1])
-        h0 = c0 = obs_feature_temp.unsqueeze(0).repeat(self.num_layers, 1, 1)
-        lstm_output, _ = self.lstm_layer(candidate_trajectory, (h0, c0))
-        residual = self.residual_output_layer(lstm_output)
-        #让residual的第一个点为(0,0)
-        residual = residual - residual[:, 0:1, :]
-        return candidate_trajectory + residual
+    def forward(self, obs_feature, lane_change_feature, out_length, driving_style_prior = None):
+        bs = obs_feature.shape[0]
+        if driving_style_prior is None:
+            driving_style = self.driving_style.expand(bs, self.n_predict, -1)
+        else:
+            if driving_style_prior.dim() == 3:
+                driving_style = self.driving_style_generator(driving_style_prior)[0][:, -1, :]
+                driving_style = driving_style.unsqueeze(0).expand(bs, -1, -1)
+            else:
+                driving_style = self.driving_style_generator(driving_style_prior)
+                driving_style = driving_style.unsqueeze(0).expand(bs, -1, -1)
+        obs_feature = obs_feature.unsqueeze(1).expand(-1, self.n_predict, -1)
+        lane_change_feature = lane_change_feature.unsqueeze(1).expand(-1, self.n_predict, -1)
+        input_ = torch.cat([obs_feature, lane_change_feature, driving_style], dim=-1)
+        input_, _= self.mode2mode_att(input_, input_, input_)
+        lstm_input = input_.contiguous().view(bs * self.n_predict, 1, -1).expand(-1, out_length, -1)
+        traj_output, _ = self.lstm_layer(lstm_input)
+        traj_output = traj_output.view(bs, self.n_predict, out_length, self.hidden_size)
+        traj_output = self.traj_head(traj_output)
+        traj_prob_output = self.trajprob_head(input_).squeeze(-1)
+        return traj_output, traj_prob_output, traj_output[:, :, -1, :]
 
 
 
@@ -328,6 +358,70 @@ class Time2Centerline(nn.Module):
         # confience_output = F.softmax(confience_output, dim=-1)
         return time_output, confience_output
     
+
+class AnchorBasedTrajectoryDecoder(nn.Module):
+    def __init__(self, input_dim, driving_style_hidden_size, hidden_dim, num_layers, n_predict) -> None:
+      super(AnchorBasedTrajectoryDecoder, self).__init__()
+      self.input_dim = input_dim
+      self.driving_style_hidden_size = driving_style_hidden_size
+      self.hidden_dim = hidden_dim
+      self.n_predict = n_predict
+      self.driving_style = nn.Parameter(torch.randn(1, n_predict, driving_style_hidden_size, dtype=torch.float64))
+      self.hidden_layer = nn.Sequential(
+          nn.Linear(input_dim, hidden_dim, dtype=torch.float64),
+          nn.LeakyReLU(0.1),
+          )
+      self.endpoint_predictor = nn.Sequential(
+          nn.Linear(hidden_dim, 2, dtype=torch.float64),
+          )
+      self.confidence_predictor = nn.Sequential(
+          nn.Linear(hidden_dim, 1, dtype=torch.float64),
+          )
+      self.trajectory_decoder = nn.LSTM(input_size=hidden_dim + 2, hidden_size=hidden_dim, num_layers=num_layers, batch_first=True, dtype=torch.float64)
+      self.op = nn.Linear(self.hidden_dim, 2, dtype=torch.float64)
+    
+    def forward(self, obs_feature, lane_change_feature, out_length):
+        # 输入验证
+        if not isinstance(out_length, int) or out_length <= 0:
+            raise ValueError("out_length 必须是正整数")
+        
+        bs = obs_feature.shape[0]
+        if len(obs_feature.shape) != 2 or len(lane_change_feature.shape) != 2:
+            raise ValueError("obs_feature 和 lane_change_feature 必须是二维张量")
+
+        # 验证 driving_style 的形状
+        if self.driving_style.shape[0] != 1:
+            raise ValueError("driving_style 的第一维必须为 1")
+
+        # 广播机制代替 unsqueeze 和 repeat
+        driving_style = self.driving_style.expand(bs, self.n_predict, -1)
+        obs_feature_expanded = obs_feature.unsqueeze(1).expand(-1, self.n_predict, -1)
+        lane_change_feature_expanded = lane_change_feature.unsqueeze(1).expand(-1, self.n_predict, -1)
+
+        # 合并特征
+        combined_features = torch.cat([obs_feature_expanded, lane_change_feature_expanded, driving_style], dim=-1)
+
+        # 隐藏层处理
+        hidden_state = self.hidden_layer(combined_features)
+
+        # 预测终点和置信度
+        endpoint_output = self.endpoint_predictor(hidden_state)
+        confidence_output = self.confidence_predictor(hidden_state).squeeze(-1)
+
+        # 解码器输入准备
+        decoder_input = torch.cat([hidden_state, endpoint_output], dim=-1)  # (bs, n_predict, hidden_dim + 2)
+
+        # LSTM 输入准备
+        lstm_input = decoder_input.view(bs * self.n_predict, 1, -1).expand(-1, out_length, -1)
+
+        # 轨迹解码
+        traj_output, _ = self.trajectory_decoder(lstm_input)
+        traj_output = traj_output.view(bs, self.n_predict, out_length, self.hidden_dim)
+
+        # 最终输出
+        final_output = self.op(traj_output)
+
+        return final_output, confidence_output, endpoint_output
 
 def trajectory_generator_by_torch(init_cond, lanes_info, target_lane, target_time, n_pred, dt):
     """

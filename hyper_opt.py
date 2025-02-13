@@ -37,7 +37,7 @@ if __name__ == '__main__':
     train_set, val_set, test_set = split_dataset(dataset)
     print("数据集长度{}, {}, {}".format(len(train_set), len(val_set), len(test_set)))
     #device
-    device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
     device_ids = [0, 1]
     
     #归一化处理
@@ -52,19 +52,19 @@ if __name__ == '__main__':
     #定义搜索空间
     space = {
         "hidden_size": hp.choice("hidden_size", [32,64,128,256]),
-        "style_size": hp.choice("style_size", [8, 16, 32, 64]),
+        "style_size": hp.choice("style_size", [8, 16, 32, 64, 128]),
         "decoder_size": hp.choice("decoder_size", [64, 128, 256]),
         "num_layers": hp.choice("num_layers", [1,2,4]),
         "head_num": hp.choice("head_num", [1,2,4]),
         "inputembedding_size": hp.choice("inputembedding_size", [8, 16, 32, 64, 128]), 
         "lr": hp.choice("lr", [0.001]),
-        "epoch": hp.choice("epoch", [100, 200]),
+        "epoch": hp.choice("epoch", [200]),
         "decay_rate": hp.choice("decay_rate", [0.1, 0.5, 1.0]),
-        "decay_step": hp.choice("decay_step", [10, 20, 50, 100]),
+        "decay_step": hp.choice("decay_step", [50, 100]),
         "batch_size": hp.choice("batch_size", [32, 64, 128, 256]),
-        "patience": hp.choice("patience", [10, 20, 30]),
+        "patience": hp.choice("patience", [30]),
     }
-    save_path = f'./save/0115_multi_model_hyperopt_horizon={args_input.predict_length}s/'
+    save_path = f'./save/0206_single_modal_hyperopt_horizon={args_input.predict_length}s/'
     if not os.path.exists(save_path):
         os.makedirs(save_path)
     #定义目标函数
@@ -84,7 +84,7 @@ if __name__ == '__main__':
                                     style_size=params["style_size"],
                                     predict_trajectory=True,
                                     device=device,
-                                    top_k=6,)
+                                    top_k=1,)
         #多卡并行
         # if torch.cuda.device_count() > 1:
         #     print(f"Let's use {torch.cuda.device_count()} GPUs!")

@@ -75,5 +75,5 @@ MAX_LANE_CHANGE_TIME = 12
 LANE_CHANGE_SAMPLR_STEP = 0.5
 
 RAW_DATA_DIR = r"C:\\Users\\Public\\yjl\\master_project\\code\\highD\\data\\"
-PROCESSED_DATA_DIR = r"C:\\Users\\Public\\yjl\\master_project\\code\\highD\\processed_data_0102_3s\\"
-DATASET_DIR = r"C:\\Users\\Public\\yjl\\master_project\\code\\highD\\"
+PROCESSED_DATA_DIR = r"E:\\master project\dataset\\highD\\processed_data_0102_3s\\"
+DATASET_DIR = r"E:\\master project\\dataset\\highD\\"
