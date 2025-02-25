@@ -1,6 +1,8 @@
+## README
+
 This code comes from the paper **" Multimodal Trajectory Prediction with Intention Recognition and Learnable Path Queries"**
 
-
+![](modules\overall frame.png)
 
 ### Environment
 
