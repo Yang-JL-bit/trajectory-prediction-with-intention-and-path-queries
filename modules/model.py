@@ -8,10 +8,9 @@ from modules.feature_weighting import FeatureWeighting
 from modules.a2a_interaction import A2A
 from modules.early_stopping import EarlyStopping
 from modules.LSTM import LSTM
-from modules.trajectory_generator import TrajectoryEvaluator, TrajectoryDecoder, Time2Centerline, AnchorBasedTrajectoryDecoder, trajectory_generator_by_torch
-from torch.utils.data.sampler import WeightedRandomSampler
+from modules.trajectory_generator import TrajectoryDecoder, Time2Centerline
 from modules.loss_fn import loss_fn_traj
-from modules.metrics import cal_traj_acc, cal_intention_acc, cal_minADE, cal_minFDE, cal_miss_rate, cal_offroad_rate, cal_kinematic_feasibility_rate
+from modules.metrics import cal_traj_acc, cal_intention_acc, cal_minADE, cal_minFDE, cal_miss_rate
 from modules.plot import visualization
 import time
 import random
@@ -56,52 +55,6 @@ class RoadPredictionModel(nn.Module):
         self.trajectory_decoder_keep = TrajectoryDecoder(input_size=hidden_size + 3 + style_size, driving_style_hidden_size=style_size, hidden_size=decoder_size, num_layers=num_layers, n_predict=top_k, use_traj_prior=use_traj_prior, use_endpoint_prior=use_endpoint_prior)
         self.trajectory_decoder_right = TrajectoryDecoder(input_size=hidden_size + 3 + style_size, driving_style_hidden_size=style_size, hidden_size=decoder_size, num_layers=num_layers, n_predict=top_k, use_traj_prior=use_traj_prior, use_endpoint_prior=use_endpoint_prior)
     
-    
-    #proposed model
-    # def forward(self, target_feature: torch.Tensor, surrounding_feature: torch.Tensor,
-    #            origin_feature: torch.Tensor, centerline_info: torch.Tensor):
-    #     bs = target_feature.shape[0]
-    #     n_surr = surrounding_feature.shape[1]
-    #     target_feature = self.feature_weighting_target(target_feature)
-    #     surrounding_feature = self.feature_weighting_surrounding(surrounding_feature.flatten(0, 1)).view(bs, n_surr, self.obs_len, self.inputembedding_size)
-    #     target_feature = self.lstm_target(target_feature)
-    #     surrounding_feature = self.lstm_surrounding(surrounding_feature.flatten(0, 1)).view(bs, n_surr, self.hidden_size)
-    #     target_feature = self.agent2agent(target_feature, surrounding_feature)
-    #     #compare
-    #     # target_feature = self.agent2agent_fc(torch.cat([target_feature, surrounding_feature.flatten(1,2)], dim=-1))
-    #     intention_score = self.intention_prediction(target_feature)  #(bs, 3)
-    #     if self.predict_trajectory:
-    #         time_2_leftcenterline, confidence_left = self.time2centerline(target_feature, torch.tensor([[1.,0.,0.]] * bs).to(target_feature.device))
-    #         time_2_currentcenterline, confidence_cur = self.time2centerline(target_feature, torch.tensor([[0.,1.,0.]] * bs).to(target_feature.device))
-    #         time_2_rightcenterline, confidence_right = self.time2centerline(target_feature, torch.tensor([[0.,0.,1.]] * bs).to(target_feature.device))
-    #         #利用多项式拟合轨迹
-    #         trajectory_pred_left = trajectory_generator_by_torch(origin_feature, 
-    #                                                              centerline_info, 
-    #                                                              torch.tensor([[1.,0.,0.]] * bs).to(origin_feature.device), 
-    #                                                              time_2_leftcenterline, self.pred_len, self.dt)
-    #         trajectory_pred_keep = trajectory_generator_by_torch(origin_feature, 
-    #                                                              centerline_info, 
-    #                                                              torch.tensor([[0.,1.,0.]] * bs).to(origin_feature.device), 
-    #                                                              time_2_currentcenterline, self.pred_len, self.dt)
-    #         trajectory_pred_right = trajectory_generator_by_torch(origin_feature, 
-    #                                                              centerline_info, 
-    #                                                              torch.tensor([[0.,0.,1.]] * bs).to(origin_feature.device), 
-    #                                                              time_2_rightcenterline, self.pred_len, self.dt)   
-    #         conbined_confidence = torch.stack([confidence_cur, confidence_left, confidence_right], dim=1) #(bs, 3, 6)
-    #         # intention_weight = intention_score.softmax(dim=1).unsqueeze(-1) #(bs, 3, 1)
-    #         intention_weight = intention_score.unsqueeze(-1) #(bs, 3, 1)
-    #         combined_weighted_confidence = intention_weight * conbined_confidence  #(bs, 3, 6)
-    #         combined_weighted_confidence = combined_weighted_confidence.view(bs, -1) #(bs, 18)
-    #         combined_trajectory = torch.cat([trajectory_pred_keep, trajectory_pred_left, trajectory_pred_right], dim=1)   #(bs, 18, n_pred, 2)  
-    #         topk_scores, topk_indices = torch.topk(combined_weighted_confidence, self.top_k, dim=1)  # (bs, top_k)
-
-    #         # Gather the corresponding trajectories
-    #         # Use advanced indexing to get the top-k trajectories
-    #         batch_indices = torch.arange(bs).unsqueeze(-1).expand(-1, self.top_k)  # (bs, top_k)
-    #         selected_trajectories = combined_trajectory[batch_indices, topk_indices]  # (bs, k, n_pred, 2)
-    #         return intention_score,  topk_scores, selected_trajectories
-    #     return intention_score
-            
     
     #直接使用LSTM解码
     def forward(self, target_feature: torch.Tensor, surrounding_feature: torch.Tensor,
@@ -158,8 +111,7 @@ class RoadPredictionModel(nn.Module):
 
 def train_model(train_dataset, val_dataset, model: RoadPredictionModel, save_path, scalar, 
                 device, predict_trajectory = True, driving_style_prior = None,batch_size = 64, 
-                lr = 0.01, epoch = 100, patience = 0, alpha = 1.0, beta = 1.0,
-                top_k = 6, decay_rate = 0.5, decay_step = 5, checkpoint = None):
+                lr = 0.01, epoch = 100, patience = 0, top_k = 6, decay_rate = 0.5, decay_step = 5, checkpoint = None):
     train_dataloader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     loss_fn = CrossEntropyLoss()
     early_stopping = EarlyStopping(patience=patience, verbose=True, save_path=save_path)
@@ -190,8 +142,6 @@ def train_model(train_dataset, val_dataset, model: RoadPredictionModel, save_pat
             lane_change_label = traj_data['lane_change_label'].to(torch.long).to(device)
             origin_feature = traj_data['origin_feature'].to(device)
             centerline_info = traj_data['centerline_info'].to(device)
-            # candidate_trajectory = traj_data['future_traj_pred'].to(device)
-            # candidate_trajectory_mask = traj_data['future_traj_mask'].to(device)
             candidate_trajectory_mask = torch.ones(target_feature.shape[0], top_k).to(device)
             future_trajectory_gt = traj_data['future_traj_gt'].to(device)
             if not predict_trajectory:
@@ -214,7 +164,7 @@ def train_model(train_dataset, val_dataset, model: RoadPredictionModel, save_pat
                 intention_acc = cal_intention_acc(intention_score, lane_change_label)
                 loss, loss_intention_cls, loss_traj_cls, loss_traj_reg, endpoint_loss = loss_fn_traj(intention_score, lane_change_label, weighted_trajectory_score, 
                                                                                       future_trajectory_gt, candidate_trajectory, candidate_trajectory_mask, 
-                                                                                      endpoint, device=device, alpha=alpha, beta=beta)
+                                                                                      endpoint, device=device, alpha=1.0, beta=1.0)
                 
                 optimizer.zero_grad()
                 loss.backward()
@@ -233,7 +183,7 @@ def train_model(train_dataset, val_dataset, model: RoadPredictionModel, save_pat
                 
         #模型验证
         scheduler.step()
-        val_loss = val_model(val_dataset, model, scalar, True, driving_style_prior=driving_style_prior, device=device, batch_size=256, alpha=alpha, beta=beta, top_k=top_k)
+        val_loss = val_model(val_dataset, model, scalar, True, driving_style_prior=driving_style_prior, device=device, batch_size=256, top_k=top_k)
         early_stopping(val_loss, model)
         if save_path != None:
             torch.save(train_loss_list, save_path + 'train_loss_list.pth')
@@ -257,8 +207,6 @@ def test_model(test_dataset, model: RoadPredictionModel,  scalar, predict_trajec
     minADE = torch.tensor(0.).to(device)
     minFDE = torch.tensor(0.).to(device)
     miss_sum = torch.tensor(0.).to(device)
-    offroad_num = torch.tensor(0.).to(device)
-    offkinematic_num = torch.tensor(0.).to(device)
     model.eval()
     with torch.no_grad():
         for traj_data in test_dataloader:
@@ -268,13 +216,7 @@ def test_model(test_dataset, model: RoadPredictionModel,  scalar, predict_trajec
             origin_feature = traj_data['origin_feature'].to(device)
             centerline_info = traj_data['centerline_info'].to(device)
             candidate_trajectory_mask = torch.ones(target_feature.shape[0], top_k).to(device)
-            # candidate_trajectory = traj_data['future_traj_pred'].to(device)
-            # candidate_trajectory_mask = traj_data['future_traj_mask'].to(device)
             future_trajectory_gt = traj_data['future_traj_gt'].to(device)
-            # driving_direction = traj_data['driving_direction'].to(device)
-            # dataset_pointer = traj_data['dataset_pointer'].to(device)
-            # driving_direction = driving_direction.unsqueeze(1).unsqueeze(1).repeat(1, top_k, 15)
-            # lanes_info = [maps_info[i.item()] for i in dataset_pointer]
             if not predict_trajectory:
                 intention_score = model(target_feature, surrounding_feature, origin_feature, centerline_info, driving_style_prior)
                 acc = cal_intention_acc(intention_score, lane_change_label)
@@ -287,13 +229,6 @@ def test_model(test_dataset, model: RoadPredictionModel,  scalar, predict_trajec
                 minFDE += cal_minFDE(weighted_trajectory_score, candidate_trajectory, candidate_trajectory_mask, future_trajectory_gt, top_k=top_k).sum(dim=-1)
                 miss_rate = cal_miss_rate(weighted_trajectory_score, candidate_trajectory, candidate_trajectory_mask, future_trajectory_gt, top_k=top_k)
                 miss_sum += int(miss_rate * len(intention_score))
-                #offroad_rate
-                # future_traj = candidate_trajectory[:, :, :, 0:2]
-                # future_traj[:, :, :, 0] = torch.where(driving_direction == 1, -future_traj[:, :, :, 0], future_traj[:, :, : ,0])
-                # future_traj[:, :, :, 1] = torch.where(driving_direction == 1, future_traj[:, :, :, 1], -future_traj[:, :, :, 1])
-                # future_traj = future_traj + origin_feature[:, 0:2].unsqueeze(1).unsqueeze(1).repeat(1, top_k, 15, 1)
-                # offroad_num += int(cal_offroad_rate(future_traj, lanes_info) * len(target_feature))
-                # offkinematic_num += int(cal_kinematic_feasibility_rate(future_traj) * len(target_feature))
                 total += len(intention_score)
                 if visulization:
                     visualization(weighted_trajectory_score, candidate_trajectory, candidate_trajectory_mask, future_trajectory_gt, top_k=top_k)
@@ -303,12 +238,12 @@ def test_model(test_dataset, model: RoadPredictionModel,  scalar, predict_trajec
         test_accuracy = correct / total
         return test_accuracy
     else:
-        return minADE / len(test_dataset), minFDE / len(test_dataset), miss_sum / total, offroad_num / total, offkinematic_num / total
+        return minADE / len(test_dataset), minFDE / len(test_dataset), miss_sum / total
 
 
 
 def val_model(val_dataset, model: RoadPredictionModel,  scalar, predict_trajectory = True, driving_style_prior = None,
-              device = 'cpu', batch_size = 64, alpha = 1.0, beta = 1.0, top_k = 6):
+              device = 'cpu', batch_size = 64, top_k = 6):
     val_dataloader = DataLoader(val_dataset, batch_size=batch_size, shuffle=True)
     target_mean = scalar['target'][0].unsqueeze(0).unsqueeze(0).to(device)
     target_std = scalar['target'][1].unsqueeze(0).unsqueeze(0).to(device)
@@ -328,8 +263,6 @@ def val_model(val_dataset, model: RoadPredictionModel,  scalar, predict_trajecto
             origin_feature = traj_data['origin_feature'].to(device)
             centerline_info = traj_data['centerline_info'].to(device)
             candidate_trajectory_mask = torch.ones(target_feature.shape[0], top_k).to(device)
-            # candidate_trajectory = traj_data['future_traj_pred'].to(device)
-            # candidate_trajectory_mask = traj_data['future_traj_mask'].to(device)
             future_trajectory_gt = traj_data['future_traj_gt'].to(device)
             if not predict_trajectory:
                 intention_score = model(target_feature, surrounding_feature, origin_feature, driving_style_prior)
@@ -342,13 +275,6 @@ def val_model(val_dataset, model: RoadPredictionModel,  scalar, predict_trajecto
                 intention_score, weighted_trajectory_score, candidate_trajectory, endpoint = model(target_feature, surrounding_feature, 
                                                                                          origin_feature, centerline_info, driving_style_prior)
                 minADE += cal_minADE(weighted_trajectory_score, candidate_trajectory, candidate_trajectory_mask, future_trajectory_gt, top_k=top_k).sum(dim=-1)
-                # traj_acc = cal_traj_acc(weighted_trajectory_score, candidate_trajectory, future_trajectory_gt, candidate_trajectory_mask)
-                # correct += int(traj_acc * len(weighted_trajectory_score[candidate_trajectory_mask > 0]))
-                # total += len(weighted_trajectory_score[candidate_trajectory_mask > 0])
-                # val_loss, _, _, _ = loss_fn_traj(intention_score, lane_change_label, weighted_trajectory_score, 
-                #                           future_trajectory_gt, candidate_trajectory, candidate_trajectory_mask, 
-                #                           device, alpha=alpha, beta=beta) 
-                # val_loss_sum += val_loss * target_feature.shape[0]
         if predict_trajectory:
             return minADE / len(val_dataset)
         else:

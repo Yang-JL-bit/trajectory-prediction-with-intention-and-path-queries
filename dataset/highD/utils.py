@@ -2,8 +2,9 @@
 Author: Yang Jialong
 Date: 2024-11-06 20:00:09
 LastEditors: Please set LastEditors
-LastEditTime: 2024-12-14 16:16:44
-Description: 请填写简介
+LastEditTime: 2025-02-25 16:48:21
+Description: constant
+PS: 该部分代码引用了 https://github.com/RobertKrajewski/highD-dataset.git
 '''
 # TRACK FILE
 BBOX = "bbox"
@@ -74,6 +75,6 @@ MIN_LANE_CHANGE_TIME = 1
 MAX_LANE_CHANGE_TIME = 12
 LANE_CHANGE_SAMPLR_STEP = 0.5
 
-RAW_DATA_DIR = r"C:\\Users\\Public\\yjl\\master_project\\code\\highD\\data\\"
-PROCESSED_DATA_DIR = r"E:\\master project\dataset\\highD\\processed_data_0102_3s\\"
-DATASET_DIR = r"E:\\master project\\dataset\\highD\\"
+RAW_DATA_DIR = r"C:\\Users\\Public\\yjl\\master_project\\code\\highD\\data\\"   ## 原始数据所在文件夹
+PROCESSED_DATA_DIR = r"E:\\master project\dataset\\highD\\processed_data_0102_3s\\" ## 处理后的数据所在文件夹
+DATASET_DIR = r"C:\\Users\\Public\\yjl\\master_project\\code\\highD\\"  ## 数据集所在文件夹

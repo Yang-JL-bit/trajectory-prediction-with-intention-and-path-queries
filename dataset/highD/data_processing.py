@@ -2,8 +2,9 @@
 Author: Yang Jialong
 Date: 2024-11-11 17:33:56
 LastEditors: Please set LastEditors
-LastEditTime: 2025-01-10 09:41:12
-Description: 请填写简介
+LastEditTime: 2025-02-25 16:43:53
+Description: 数据处理
+PS: 该部分代码引用了 https://github.com/RobertKrajewski/highD-dataset.git
 '''
 
 import pandas as pd
@@ -17,7 +18,6 @@ from random import sample
 from tqdm import tqdm, trange
 from matplotlib import pyplot as plt
 from dataset.highD.utils import *
-from modules.trajectory_generator import TrajectoryGenerator, trajectory_generator_by_torch
 from torch.utils.data import Dataset, random_split
 
 
@@ -50,15 +50,6 @@ class HighD(Dataset):
                 print(file, )
             for file in tqdm(load_file_list):
                 scene_data = torch.load(processed_dir + file)
-                # id = int(file.split('_')[1])
-                # recording_meta = self.read_recording_meta(self.raw_data_dir + str(id).zfill(2) + "_recordingMeta.csv")
-                # lane_num = len(recording_meta[UPPER_LANE_MARKINGS]) + \
-                #     len(recording_meta[LOWER_LANE_MARKINGS]) - 2
-                # lanes_info = self.get_lanes_info(lane_num, recording_meta)
-                # self.maps_info[id] = lanes_info
-                # scene_data = torch.load(processed_dir + file)
-                # scene_data = [{**scene, "dataset_pointer": id} for scene in scene_data]
-                # scene_data = [{**scene, "driving_direction": torch.tensor(self.get_driving_direcion_by_pos(scene["origin_feature"][1], lanes_info))} for scene in scene_data]
                 self.scene_data_list.extend(scene_data)
                 if under_sample is not None:
                     print("Under sampling...")
@@ -739,35 +730,35 @@ class HighD(Dataset):
         return scores
     
     
-    def plot_scene(self, lane_info, target_track_csv, start_frame_idx, origin_feature, centerline_info):
-        target_gt = []
-        i = start_frame_idx + self.obs_len
-        while (i < start_frame_idx + self.obs_len + self.pred_len):
-            if ((i - start_frame_idx - self.obs_len) % self.traj_sample_rate != 0):
-                i += 1
-                continue
-            target_gt_temp = []
-            target_gt_temp.append(target_track_csv[X][i] + target_track_csv[WIDTH][i] / 2)
-            target_gt_temp.append(target_track_csv[Y][i] + target_track_csv[HEIGHT][i] / 2)
-            i += 1
-            target_gt.append(target_gt_temp)
-        lanes_line = []
-        start_x = target_track_csv[X][start_frame_idx + self.obs_len] - 150
-        end_x = target_track_csv[X][start_frame_idx + self.obs_len] + 150
-        line_space_x = np.linspace(start_x, end_x, 200)
-        traj_pred = trajectory_generator_by_torch(origin_feature, centerline_info, 
-                                                  torch.tensor([[0,1, 0]]), 
-                                                  torch.linspace(0.5 ,10, 20, dtype=torch.float64).unsqueeze(0),
-                                                  n_pred=15, dt = 0.2)[0]
-        fig, ax = plt.subplots()
-        for lane_id, laneline in lane_info.items():
-            ax.plot(line_space_x, np.ones_like(line_space_x) * laneline[0], color = 'black')
-            ax.plot(line_space_x, np.ones_like(line_space_x) * laneline[2], color = 'black')
-        ax.plot(np.array(target_gt)[:, 0], np.array(target_gt)[:, 1], color = 'red')
-        for traj in traj_pred:
-            ax.plot(traj[:, 0], traj[:, 1], color = 'green')
-        ax.invert_yaxis()
-        plt.show()
+    # def plot_scene(self, lane_info, target_track_csv, start_frame_idx, origin_feature, centerline_info):
+    #     target_gt = []
+    #     i = start_frame_idx + self.obs_len
+    #     while (i < start_frame_idx + self.obs_len + self.pred_len):
+    #         if ((i - start_frame_idx - self.obs_len) % self.traj_sample_rate != 0):
+    #             i += 1
+    #             continue
+    #         target_gt_temp = []
+    #         target_gt_temp.append(target_track_csv[X][i] + target_track_csv[WIDTH][i] / 2)
+    #         target_gt_temp.append(target_track_csv[Y][i] + target_track_csv[HEIGHT][i] / 2)
+    #         i += 1
+    #         target_gt.append(target_gt_temp)
+    #     lanes_line = []
+    #     start_x = target_track_csv[X][start_frame_idx + self.obs_len] - 150
+    #     end_x = target_track_csv[X][start_frame_idx + self.obs_len] + 150
+    #     line_space_x = np.linspace(start_x, end_x, 200)
+    #     traj_pred = trajectory_generator_by_torch(origin_feature, centerline_info, 
+    #                                               torch.tensor([[0,1, 0]]), 
+    #                                               torch.linspace(0.5 ,10, 20, dtype=torch.float64).unsqueeze(0),
+    #                                               n_pred=15, dt = 0.2)[0]
+    #     fig, ax = plt.subplots()
+    #     for lane_id, laneline in lane_info.items():
+    #         ax.plot(line_space_x, np.ones_like(line_space_x) * laneline[0], color = 'black')
+    #         ax.plot(line_space_x, np.ones_like(line_space_x) * laneline[2], color = 'black')
+    #     ax.plot(np.array(target_gt)[:, 0], np.array(target_gt)[:, 1], color = 'red')
+    #     for traj in traj_pred:
+    #         ax.plot(traj[:, 0], traj[:, 1], color = 'green')
+    #     ax.invert_yaxis()
+    #     plt.show()
     
     def generate_training_data(self, number):
         tracks_csv = self.read_tracks_csv(self.raw_data_dir + str(number).zfill(2) + "_tracks.csv")
@@ -817,14 +808,14 @@ class HighD(Dataset):
                 lane_changing_ids.append(key)
             else:
                 lane_keeping_ids.append(key)
-        traj_generator = TrajectoryGenerator(self.obs_len, self.pred_len, lanes_info)
+        # traj_generator = TrajectoryGenerator(self.obs_len, self.pred_len, lanes_info)
         #2. 获取变道轨迹的特征
         for id in tqdm(lane_changing_ids):
             lane_change_info = self.get_lane_changing_info(tracks_csv[id], lane_num)
             driving_direction = tracks_meta[id][DRIVING_DIRECTION]
             for i in range(len(tracks_csv[id][FRAME]) - self.obs_len - self.pred_len + 1):
                 target_feature, surroungding_feature, target_gt, origin_feature, centerline_info = self.construct_traj_features(tracks_csv, tracks_meta, id, i, lanes_info, driving_direction)
-                future_traj_feature, future_lc_feature, mask = self.construct_future_traj_feature(tracks_csv[id], i, lane_num, traj_generator)
+                # future_traj_feature, future_lc_feature, mask = self.construct_future_traj_feature(tracks_csv[id], i, lane_num, traj_generator)
                 lane_change_label = self.get_traj_label(i + self.obs_len - 1, lane_change_info)
                 scene_dict = {}
                 scene_dict["target_obs_traj"] = torch.tensor(target_feature) #(obs_len, feature_dim)
@@ -835,9 +826,9 @@ class HighD(Dataset):
                 scene_dict["centerline_info"] = torch.tensor(centerline_info)
                 # self.plot_scene(lanes_info, tracks_csv[id], i, 
                 #                 scene_dict["origin_feature"].unsqueeze(0), scene_dict["centerline_info"].unsqueeze(0))
-                scene_dict["future_traj_pred"] = torch.tensor(future_traj_feature) # (70, pred_len, 2)
-                scene_dict["future_traj_intention"] = torch.tensor(future_lc_feature) # (70, 3)
-                scene_dict["future_traj_mask"] = torch.tensor(mask) #(70, )
+                # scene_dict["future_traj_pred"] = torch.tensor(future_traj_feature) # (70, pred_len, 2)
+                # scene_dict["future_traj_intention"] = torch.tensor(future_lc_feature) # (70, 3)
+                # scene_dict["future_traj_mask"] = torch.tensor(mask) #(70, )
                 
                 # scene_dict["future_traj_score"] = self.cal_candidate_trajectory_score(scene_dict["future_traj_pred"], scene_dict["future_traj_gt"], scene_dict["future_traj_mask"])
                 scene_list.append(scene_dict)
@@ -861,7 +852,7 @@ class HighD(Dataset):
             driving_direction = tracks_meta[id][DRIVING_DIRECTION]
             for i in range(len(tracks_csv[id][FRAME]) - self.obs_len - self.pred_len + 1):
                 target_feature, surroungding_feature, target_gt, origin_feature, centerline_info = self.construct_traj_features(tracks_csv, tracks_meta, id, i, lanes_info, driving_direction)
-                future_traj_feature, future_lc_feature, mask = self.construct_future_traj_feature(tracks_csv[id], i, lane_num, traj_generator)
+                # future_traj_feature, future_lc_feature, mask = self.construct_future_traj_feature(tracks_csv[id], i, lane_num, traj_generator)
                 lane_change_label = 0.
                 scene_dict = {}
                 scene_dict["target_obs_traj"] = torch.tensor(target_feature) #(obs_len, feature_dim)
@@ -870,9 +861,9 @@ class HighD(Dataset):
                 scene_dict["future_traj_gt"] = torch.tensor(target_gt) #(pred_len, 2)
                 scene_dict["origin_feature"] = torch.tensor(origin_feature)
                 scene_dict["centerline_info"] = torch.tensor(centerline_info)
-                scene_dict["future_traj_pred"] = torch.tensor(future_traj_feature) # (70, pred_len, 2)
-                scene_dict["future_traj_intention"] = torch.tensor(future_lc_feature) # (70, 3)
-                scene_dict["future_traj_mask"] = torch.tensor(mask) #(70, )
+                # scene_dict["future_traj_pred"] = torch.tensor(future_traj_feature) # (70, pred_len, 2)
+                # scene_dict["future_traj_intention"] = torch.tensor(future_lc_feature) # (70, 3)
+                # scene_dict["future_traj_mask"] = torch.tensor(mask) #(70, )
                 scene_list.append(scene_dict)
         return scene_list
     

@@ -1,8 +1,8 @@
 '''
 Author: Yang Jialong
 Date: 2024-12-02 10:34:02
-LastEditTime: 2025-01-11 15:56:21
-Description: 请填写简介
+LastEditTime: 2025-02-25 16:33:25
+Description: 损失函数
 '''
 import torch
 import torch.nn as nn
@@ -49,9 +49,6 @@ def loss_fn_traj(
         1,
         traj_score_pred_idx.view(batch_size, 1, 1, 1).expand(-1, -1, n_pred, 2)
     ).squeeze(1)  # 去掉轨迹选择的维度
-
-    # Smooth L1 损失    
-    # loss_traj_reg = F.smooth_l1_loss(closest_candidate_traj, traj_gt, reduction="mean")
         
     criterion_reg = nn.SmoothL1Loss().to(device)
     loss_traj_reg = criterion_reg(closest_candidate_traj, traj_gt)
@@ -63,7 +60,8 @@ def loss_fn_traj(
         traj_score_pred_idx.view(batch_size, 1, 1).expand(-1, -1, 2)
     ).squeeze(1)
     endpoint_loss = F.smooth_l1_loss(closet_endpoint, traj_gt[:, -1, :], reduction="mean")
-    # 4. 总损失
+    # 4. 总损失（去掉了endpointloss）
     total_loss = loss_intention_cls + alpha * loss_traj_cls + beta * loss_traj_reg
+    
     return total_loss, loss_intention_cls, loss_traj_cls, loss_traj_reg, endpoint_loss
 

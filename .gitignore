@@ -1,4 +1,7 @@
 fig/
 save/
+.vscode/
 experiment_report/
 *.sh
+参数记录.md
+modules/plot.py

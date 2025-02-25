@@ -2,7 +2,7 @@
 Author: Yang Jialong
 Date: 2024-11-12 10:15:12
 LastEditors: Please set LastEditors
-LastEditTime: 2025-01-16 16:17:38
+LastEditTime: 2025-02-25 16:22:52
 Description: 超参数调优
 '''
 import os
@@ -44,10 +44,7 @@ if __name__ == '__main__':
     scalar = {}
     scalar["target"] = standard_normalization(torch.stack([i['target_obs_traj'] for i in train_set]))
     scalar["surrounding"] = standard_normalization(torch.stack([i['surrounding_obs_traj'] for i in train_set]))
-    label_weight = get_label_weight(dataset)
-    sample_weight = get_sample_weight(train_set, label_weight)
-    test_weight = get_sample_weight(test_set, label_weight)
-    val_weight = get_sample_weight(val_set, label_weight)
+
     
     #定义搜索空间
     space = {
@@ -64,6 +61,8 @@ if __name__ == '__main__':
         "batch_size": hp.choice("batch_size", [32, 64, 128, 256]),
         "patience": hp.choice("patience", [30]),
     }
+    
+    #保存路径
     save_path = f'./save/0206_single_modal_hyperopt_horizon={args_input.predict_length}s/'
     if not os.path.exists(save_path):
         os.makedirs(save_path)

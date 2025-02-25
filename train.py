@@ -3,8 +3,8 @@
 Author: Yang Jialong
 Date: 2024-11-11 09:56:15
 LastEditors: Please set LastEditors
-LastEditTime: 2025-01-12 22:05:48
-Description: 训练并测试道路场景下意图识别模型
+LastEditTime: 2025-02-25 16:25:41
+Description: 训练轨迹预测模型
 '''
 import os
 import pandas as pd 
@@ -13,17 +13,34 @@ import torch
 import argparse
 import random
 from torch.utils.data import DataLoader, Subset
-from modules.model import RoadPredictionModel, train_model, test_model
-from dataset.highD.data_processing import HighD, split_dataset, get_label_weight, get_sample_weight, standard_normalization
-from dataset.highD.utils import RAW_DATA_DIR, PROCESSED_DATA_DIR,DATASET_DIR
+from modules.model import RoadPredictionModel, train_model
+from dataset.highD.data_processing import HighD, split_dataset, standard_normalization
+from dataset.highD.utils import RAW_DATA_DIR, PROCESSED_DATA_DIR, DATASET_DIR
 from modules.traj_cluster import cluster_trajectories, cluster_last_points_by_label
 
 
 
 if __name__ == '__main__': 
     
+    # parse arguments
     parser = argparse.ArgumentParser()
     parser.add_argument('--predict_length', type=int, default=8)
+    parser.add_argument('--top_k', type=int, default=6)
+    parser.add_argument('--inputembedding_size', type=int, default=32)
+    parser.add_argument('--hidden_size', type=int, default=128)
+    parser.add_argument('--style_size', type=int, default=64)
+    parser.add_argument('--head_num', type=int, default=4)
+    parser.add_argument('--batch_size', type=int, default=64)
+    parser.add_argument('--decoder_size', type=int, default=256)
+    parser.add_argument('--decay_rate', type=float, default=0.1)
+    parser.add_argument('--decay_step', type=int, default=100)
+    parser.add_argument('--lr', type=float, default=0.001)
+    parser.add_argument('--epoch', type=int, default=200)
+    parser.add_argument('--patience', type=int, default=30)
+    parser.add_argument('--predict_trajectory', type=bool, default=True)
+    parser.add_argument('--use_driving_style_prior', type=bool, default=True)
+    parser.add_argument('--use_endpoint_prior', type=bool, default=False)
+    parser.add_argument('--use_trajectory_prior', type=bool, default=True)
     args_input = parser.parse_args()
     processed_dir = DATASET_DIR + f'processed_data_0102_{args_input.predict_length}s/'
     
@@ -47,25 +64,20 @@ if __name__ == '__main__':
     scalar["surrounding"] = standard_normalization(torch.stack([i['surrounding_obs_traj'] for i in train_set]))
     
     #device
-    device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
-    device_ids = [0, 1]                 
+    device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")                
     
     #是否预测轨迹
-    predict_trajectory = True
-    top_k = 6
+    predict_trajectory = args_input.predict_trajectory
+    top_k = args_input.top_k  #top k trajectories
 
 
-    #driving style prior
-    use_driving_style_prior = False
-    use_trajectory_prior = False
-    use_endpoint_prior = False
-    if use_driving_style_prior:
+    #轨迹聚类
+    if args_input.use_driving_style_prior:
         sample_size = 5000
-        random.seed(100) #traj
-        # random.seed(42)  #endpoint
+        random.seed(100)
         indices = random.sample(range(len(train_set)), sample_size)  # 随机选择索引
         sub_trainset = Subset(train_set, indices)  # 创建子集
-        if use_trajectory_prior:
+        if args_input.use_trajectory_prior:
             driving_style_prior = cluster_trajectories(sub_trainset, num_clusters=top_k)
         else:
             driving_style_prior = cluster_last_points_by_label(sub_trainset, num_clusters=top_k)
@@ -73,63 +85,55 @@ if __name__ == '__main__':
     else:
         driving_style_prior = None
 
+    
     model = RoadPredictionModel(obs_len=10,
                                 pred_len=5 * args_input.predict_length,
-                                inputembedding_size=64,
+                                inputembedding_size=args_input.inputembedding_size,
                                 input_size=10, 
-                                hidden_size=128,
+                                hidden_size=args_input.hidden_size,
                                 num_layers=1, 
-                                head_num=4, 
-                                style_size=16,
-                                decoder_size=256,
+                                head_num=args_input.head_num, 
+                                style_size=args_input.style_size,
+                                decoder_size=args_input.decoder_size,
                                 predict_trajectory=predict_trajectory,
                                 refinement_num=1,
                                 top_k=top_k,
                                 dt = 0.2,
                                 device=device,
-                                use_traj_prior=use_trajectory_prior,
-                                use_endpoint_prior=use_endpoint_prior)
+                                use_traj_prior=args_input.use_trajectory_prior,
+                                use_endpoint_prior=args_input.use_endpoint_prior)
     
-    #之前的参数
-    # model = RoadPredictionModel(obs_len=10,
-    #                             pred_len=5 * args_input.predict_length,
-    #                             inputembedding_size=64,
-    #                             input_size=10, 
-    #                             hidden_size=64,
-    #                             num_layers=1, 
-    #                             head_num=2, 
-    #                             style_size=64,
-    #                             decoder_size=256,
-    #                             predict_trajectory=predict_trajectory,
-    #                             refinement_num=1,
-    #                             top_k=top_k,
-    #                             dt = 0.2,
-    #                             device=device,
-    #                             use_traj_prior=use_trajectory_prior,
-    #                             use_endpoint_prior=use_endpoint_prior)
-
-
+    
     #保存路径
-    save_path = f'./save/0213_training_horizon={args_input.predict_length}s_4/'
+    save_path = f'./save/0225_training_horizon={args_input.predict_length}s_baseline_test/'
     if not os.path.exists(save_path):
         os.makedirs(save_path)
            
-    #从checkpoint恢复训练
+    #从checkpoint恢复训练(None即为重新训练)
     checkpoint = None
     # checkpoint = torch.load(save_path + 'checkpoint.pth')
+    
     #模型训练
     #多卡并行
     # if torch.cuda.device_count() > 1:
     #     print(f"Let's use {torch.cuda.device_count()} GPUs!")
     #     model = nn.DataParallel(model)
     model.to(device)
-    # label_weight = get_label_weight(dataset)
-    # sample_weight = get_sample_weight(train_set, label_weight)
-    # test_weight = get_sample_weight(test_set, label_weight)
-    # val_weight = get_sample_weight(val_set, label_weight)
-    train_model(train_set, val_set, model, scalar=scalar, 
-                save_path=save_path, predict_trajectory=predict_trajectory, driving_style_prior=driving_style_prior, 
-                device=device, patience=30, batch_size=64, lr=0.001,
-                epoch=200, alpha=1.0, beta=1.0, checkpoint=checkpoint, top_k=top_k, decay_step=100, decay_rate=0.1)
+    train_model(train_set, 
+                val_set, 
+                model, 
+                scalar=scalar, 
+                save_path=save_path, 
+                predict_trajectory=predict_trajectory, 
+                driving_style_prior=driving_style_prior, 
+                device=device, 
+                patience=args_input.patience, 
+                batch_size=args_input.batch_size, 
+                lr=args_input.lr,
+                epoch=args_input.epoch, 
+                checkpoint=checkpoint, 
+                top_k=top_k, 
+                decay_step=args_input.decay_step, 
+                decay_rate=args_input.decay_rate)
     
     

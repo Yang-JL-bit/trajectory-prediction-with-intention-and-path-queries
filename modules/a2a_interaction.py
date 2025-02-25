@@ -2,8 +2,8 @@
 Author: Yang Jialong
 Date: 2024-11-11 17:33:54
 LastEditors: Please set LastEditors
-LastEditTime: 2025-01-10 23:11:19
-Description: 请填写简介
+LastEditTime: 2025-02-25 16:44:46
+Description: agent attention
 '''
 import torch
 import torch.nn as nn
@@ -60,7 +60,7 @@ class SelfAttention(nn.Module):
 class A2A(nn.Module):
     def __init__(self, input_size, hidden_size, head_num) -> None:
         super(A2A,self).__init__()
-        self.self_attention = SelfAttention(input_size, head_num, hidden_size, hidden_size)
+        self.self_attention = SelfAttention(input_size, head_num, hidden_size, hidden_size)  #不用这个了
         self.self_attention_2 = nn.MultiheadAttention(hidden_size, head_num, batch_first=True, dtype=torch.float64)
         self.batch_norm = nn.BatchNorm1d(hidden_size, dtype=torch.float64)
         self.layer_norm = nn.LayerNorm(hidden_size, dtype=torch.float64)

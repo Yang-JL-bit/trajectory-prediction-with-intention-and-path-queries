@@ -1,8 +1,8 @@
 '''
 Author: Yang Jialong
 Date: 2024-11-11 17:33:56
-LastEditTime: 2025-01-16 06:43:55
-Description: 请填写简介
+LastEditTime: 2025-02-25 16:34:05
+Description: 早停机制
 '''
 import torch
 import numpy as np
