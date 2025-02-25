@@ -2,7 +2,8 @@
 
 This code come from the paper **" Multimodal Trajectory Prediction with Intention Recognition and Learnable Path Queries"**
 
-![](overall frame.png)
+![](overall_frame.png)
+
 ### Environment
 
 You can create a virtual environment by `env.yaml`.
