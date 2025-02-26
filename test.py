@@ -1,7 +1,7 @@
 '''
 Author: Yang Jialong
 Date: 2024-11-11 17:33:57
-LastEditTime: 2025-02-25 16:20:32
+LastEditTime: 2025-02-26 09:16:39
 Description: 测试模型
 '''
 import os
@@ -24,9 +24,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--predict_length', type=int, default=8)
     parser.add_argument('--top_k', type=int, default=6)
-    parser.add_argument('--inputembedding_size', type=int, default=32)
+    parser.add_argument('--inputembedding_size', type=int, default=16)
     parser.add_argument('--hidden_size', type=int, default=128)
-    parser.add_argument('--style_size', type=int, default=64)
+    parser.add_argument('--style_size', type=int, default=256)
     parser.add_argument('--head_num', type=int, default=4)
     parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--decoder_size', type=int, default=256)
@@ -107,7 +107,7 @@ if __name__ == '__main__':
                                             model,
                                             scalar, 
                                             predict_trajectory=predict_trajectory, 
-                                            driving_style_prior=args_input.driving_style_prior,
+                                            driving_style_prior=driving_style_prior,
                                             batch_size=args_input.batch_size,
                                             device = device, 
                                             visulization=False, 
