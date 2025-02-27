@@ -1,17 +1,45 @@
 '''
 Author: Yang Jialong
 Date: 2024-12-03 14:47:23
-LastEditTime: 2025-01-16 15:51:12
+LastEditTime: 2025-02-26 16:06:02
 Description: 请填写简介
 '''
 import torch
 import numpy as np
+from modules.loss_fn import convert_prior_dict_to_tensor
 
 def cal_intention_acc(pred, label):
     pred = torch.argmax(pred, dim=-1)
     acc = torch.sum(pred == label) / len(pred)
     return acc
 
+
+def cal_combined_traj_acc(combined_traj_pred, traj_prior_dict, intention_label, traj_gt):
+    bs = combined_traj_pred.shape[0]
+    n_pred = traj_gt.shape[1]
+    traj_prior = convert_prior_dict_to_tensor(traj_prior_dict, bs, n_pred)
+    traj_prior = traj_prior.to(intention_label.device)
+    selected_prior = traj_prior[torch.arange(bs), intention_label]
+    # Step 3. 计算欧式距离（平方和）
+    # 扩展GT维度用于广播计算
+    gt_expanded = traj_gt.unsqueeze(1)  # (bs, 1, T, 2)
+    
+    # 计算所有候选轨迹与GT的差异
+    diff = selected_prior - gt_expanded  # (bs, 6, T, 2)
+    
+    # 计算每个候选轨迹的平方距离和（按时间和坐标维度）
+    distance = (diff ** 2).sum(dim=(-1, -2))  # (bs, 6)
+    
+    # Step 4. 找到最近邻轨迹的索引
+    closest_idx = distance.argmin(dim=1)  # (bs,)
+    
+    # Step 5. 转换为全局索引（intention_id*6 + mode_id）
+    global_indices = intention_label * 6 + closest_idx  # (bs,)
+    
+    pred = torch.argmax(combined_traj_pred, dim=-1)
+    acc = torch.sum(global_indices == pred) / len(global_indices)
+    return acc
+    
 
 def cal_traj_acc(traj_score_pred, candidate_traj,  traj_gt, candidate_traj_mask):
     traj_distances = torch.norm(candidate_traj - traj_gt.unsqueeze(1), dim=-1)[:,:,-1]  # 路径上所有点的 L2 距离
